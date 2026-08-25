@@ -7,7 +7,7 @@ name = "openphysgraspgen"
 version = "0.1.0b0"
 description = "OpenPhysGraspGen beta"
 readme = "README.md"
-license = "BSD-3-Clause"
+license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
