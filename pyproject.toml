@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openphysgraspgen"
+version = "0.1.0b0"
+description = "OpenPhysGraspGen beta"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.scripts]
+openphysgraspgen = "openphysgraspgen.pipeline:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
