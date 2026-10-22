@@ -1,5 +1,6 @@
 # OpenPhysGraspGen
 
+[![CI](https://github.com/Official-Space-AI/OpenPhysGraspGen/actions/workflows/ci.yml/badge.svg)](https://github.com/Official-Space-AI/OpenPhysGraspGen/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Status](https://img.shields.io/badge/status-public%20beta-orange)
@@ -46,8 +47,12 @@ For development:
 ```bash
 git clone https://github.com/Official-Space-AI/OpenPhysGraspGen.git
 cd OpenPhysGraspGen
-pip install -e .
+pip install -e ".[dev]"
+ruff check . && ruff format --check .
+pytest
 ```
+
+The same checks run in CI on every pull request, with tests on Python 3.10 to 3.14.
 
 ## Quick start
 
