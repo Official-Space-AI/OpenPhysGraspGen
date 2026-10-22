@@ -5,12 +5,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openphysgraspgen"
 version = "0.1.0b0"
-description = "OpenPhysGraspGen beta"
+description = "Physics-labelled grasp data generation for deformable objects"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+authors = [{ name = "SpaceAI" }]
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
+keywords = ["robotics", "grasping", "deformable", "simulation", "hyperelasticity", "dataset"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.urls]
+Homepage = "https://github.com/Official-Space-AI/OpenPhysGraspGen"
+Issues = "https://github.com/Official-Space-AI/OpenPhysGraspGen/issues"
 
 [project.scripts]
 openphysgraspgen = "openphysgraspgen.pipeline:main"

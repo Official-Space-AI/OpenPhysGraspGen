@@ -1,0 +1,9 @@
+OpenPhysGraspGen
+Copyright 2026 SpaceAI (주식회사 스페이스에이아이)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product does not bundle third-party source code. At install time it
+depends on NumPy (https://numpy.org), distributed under BSD-3-Clause AND 0BSD
+AND MIT AND Zlib AND CC0-1.0. The full list of components and licenses for each
+release is published as an SPDX and CycloneDX SBOM in the release assets.
