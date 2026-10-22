@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -11,7 +11,8 @@ class SimFrame:
     contacts: Any
     body_q: Any
     n_robot_shapes: int
-    soft_slice: slice = slice(None)
+    # slice objects are unhashable before Python 3.12, so they need a default factory.
+    soft_slice: slice = field(default_factory=lambda: slice(None))
     sim_time: float = 0.0
     waypoint: int = -1
     frame: int = -1
