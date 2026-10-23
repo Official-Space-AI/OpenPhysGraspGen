@@ -30,7 +30,13 @@ SpaceAI PhysGraspGen 프로젝트의 공개 부분이며, 순수 Python·NumPy�
 
 ## 설치
 
-Python 3.10 이상. 아직 PyPI에는 올라가 있지 않습니다.
+Python 3.10 이상이 필요합니다. 패키지 이름은 `physgraspgen`이고, `1.0.0rc1`부터 PyPI에 올라갑니다.
+
+```bash
+pip install physgraspgen
+```
+
+그 전까지는 GitHub에서 설치합니다.
 
 ```bash
 pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
@@ -42,7 +48,7 @@ pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
 실행합니다.
 
 ```bash
-openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
+physgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 ```
 
 구성방정식을 직접 계산하는 예시와 Newton 접촉 라벨 기록 예시는

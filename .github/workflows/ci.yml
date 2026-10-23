@@ -32,6 +32,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest --cov=openphysgraspgen --cov-report=term-missing
+      - run: pytest --cov=physgraspgen --cov-report=term-missing
       - name: CLI smoke test
-        run: openphysgraspgen > /dev/null
+        run: physgraspgen > /dev/null

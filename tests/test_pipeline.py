@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from openphysgraspgen import run_pipeline
+from physgraspgen import run_pipeline
 
 
 def test_reference_pipeline_runs_end_to_end():
