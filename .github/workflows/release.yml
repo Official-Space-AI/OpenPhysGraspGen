@@ -1,0 +1,116 @@
+name: Release
+
+# Pushing a version tag (v1.0.0rc1, v1.0.0, ...) builds the sdist and wheel, describes
+# them in SPDX and CycloneDX SBOMs, publishes them to PyPI and attaches everything to a
+# GitHub release. Steps for maintainers are in RELEASING.md.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Check that the tag matches the package version
+        run: |
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version in pyproject.toml"
+            exit 1
+          fi
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      # The SBOMs describe what `pip install openphysgraspgen` gives a user: the built
+      # wheel and the dependencies it resolves, not the source tree. The environment is
+      # created without pip so that only the release and its dependencies are listed.
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv --without-pip "$RUNNER_TEMP/release-env"
+          pip --python "$RUNNER_TEMP/release-env/bin/python" install dist/*.whl
+      - name: Generate the SPDX SBOM
+        uses: anchore/sbom-action@v0.24.3
+        with:
+          path: ${{ runner.temp }}/release-env
+          format: spdx-json
+          output-file: sbom/openphysgraspgen-${{ github.ref_name }}.spdx.json
+          upload-artifact: false
+      - name: Generate the CycloneDX SBOM
+        uses: anchore/sbom-action@v0.24.3
+        with:
+          path: ${{ runner.temp }}/release-env
+          format: cyclonedx-json
+          output-file: sbom/openphysgraspgen-${{ github.ref_name }}.cdx.json
+          upload-artifact: false
+      - name: Check that the SBOMs list the release and its dependencies
+        run: |
+          spdx=sbom/openphysgraspgen-$GITHUB_REF_NAME.spdx.json
+          cdx=sbom/openphysgraspgen-$GITHUB_REF_NAME.cdx.json
+          version=${GITHUB_REF_NAME#v}
+          jq -e --arg v "$version" '.spdxVersion and any(.packages[]; .name == "openphysgraspgen" and .versionInfo == $v) and any(.packages[]; .name == "numpy")' "$spdx"
+          jq -e --arg v "$version" '.bomFormat == "CycloneDX" and any(.components[]; .name == "openphysgraspgen" and .version == $v) and any(.components[]; .name == "numpy")' "$cdx"
+      - name: Scan the SBOM for known vulnerabilities
+        uses: anchore/scan-action@v7.4.2
+        with:
+          sbom: sbom/openphysgraspgen-${{ github.ref_name }}.spdx.json
+          fail-build: true
+          severity-cutoff: high
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: |
+            dist/
+            sbom/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/openphysgraspgen/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+      # Trusted publishing: PyPI accepts this workflow's OIDC token, so no API token is stored.
+      - uses: pypa/gh-action-pypi-publish@v1.14.3
+
+  github-release:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+      - run: sha256sum dist/* > SHA256SUMS
+      - name: Attest build provenance
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Attest the SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/*.whl
+          sbom-path: sbom/openphysgraspgen-${{ github.ref_name }}.spdx.json
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=
+          if [[ "$GITHUB_REF_NAME" =~ (a|b|rc)[0-9]+$ ]]; then prerelease=--prerelease; fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "$GITHUB_REF_NAME" --generate-notes $prerelease \
+            dist/* sbom/* SHA256SUMS
