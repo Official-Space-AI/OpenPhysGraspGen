@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openphysgraspgen"
+name = "physgraspgen"
 version = "0.1.0b0"
 description = "Physics-labelled grasp data generation for deformable objects"
 readme = "README.md"
@@ -28,7 +28,7 @@ Homepage = "https://github.com/Official-Space-AI/OpenPhysGraspGen"
 Issues = "https://github.com/Official-Space-AI/OpenPhysGraspGen/issues"
 
 [project.scripts]
-openphysgraspgen = "openphysgraspgen.pipeline:main"
+physgraspgen = "physgraspgen.pipeline:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
