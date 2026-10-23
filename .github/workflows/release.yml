@@ -1,0 +1,122 @@
+name: Release
+
+# Pushing a version tag (v1.0.0rc1, v1.0.0, ...) builds the sdist and wheel, describes
+# them in SPDX and CycloneDX SBOMs, publishes them to PyPI and attaches everything to a
+# GitHub release. Steps for maintainers are in RELEASING.md.
+#
+# Third-party actions are pinned to full commit SHAs, with the release tag in a comment;
+# Dependabot (.github/dependabot.yml) proposes updates.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Check that the tag matches the package version
+        run: |
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version in pyproject.toml"
+            exit 1
+          fi
+      - run: pip install build==1.6.1 twine==7.0.0
+      - run: python -m build
+      - run: twine check --strict dist/*
+      # The SBOMs describe what `pip install physgraspgen` gives a user: the built wheel
+      # and the dependencies it resolves, not the source tree. The environment is created
+      # without pip so that only the release and its dependencies are listed.
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv --without-pip "$RUNNER_TEMP/release-env"
+          pip --python "$RUNNER_TEMP/release-env/bin/python" install dist/*.whl
+      - name: Generate the SPDX SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3 (Syft v1.54.0)
+        with:
+          path: ${{ runner.temp }}/release-env
+          format: spdx-json
+          output-file: sbom/physgraspgen-${{ github.ref_name }}.spdx.json
+          upload-artifact: false
+      - name: Generate the CycloneDX SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3 (Syft v1.54.0)
+        with:
+          path: ${{ runner.temp }}/release-env
+          format: cyclonedx-json
+          output-file: sbom/physgraspgen-${{ github.ref_name }}.cdx.json
+          upload-artifact: false
+      - name: Check that the SBOMs list the release and its dependencies
+        run: |
+          spdx=sbom/physgraspgen-$GITHUB_REF_NAME.spdx.json
+          cdx=sbom/physgraspgen-$GITHUB_REF_NAME.cdx.json
+          version=${GITHUB_REF_NAME#v}
+          jq -e --arg v "$version" '.spdxVersion and any(.packages[]; .name == "physgraspgen" and .versionInfo == $v) and any(.packages[]; .name == "numpy")' "$spdx"
+          jq -e --arg v "$version" '.bomFormat == "CycloneDX" and any(.components[]; .name == "physgraspgen" and .version == $v) and any(.components[]; .name == "numpy")' "$cdx"
+      - name: Scan the SBOM for known vulnerabilities
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2 (Grype v0.118.0)
+        with:
+          sbom: sbom/physgraspgen-${{ github.ref_name }}.spdx.json
+          fail-build: true
+          severity-cutoff: high
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/
+            sbom/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/physgraspgen/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      # Trusted publishing: PyPI accepts this workflow's OIDC token, so no API token is stored.
+      # v1.14.3 or later is required (GHSA-5xjx-3w67-w9x9).
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  github-release:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - run: sha256sum dist/* > SHA256SUMS
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Attest the SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*.whl
+          sbom-path: sbom/physgraspgen-${{ github.ref_name }}.spdx.json
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=
+          if [[ "$GITHUB_REF_NAME" =~ (a|b|rc)[0-9]+$ ]]; then prerelease=--prerelease; fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "$GITHUB_REF_NAME" --generate-notes $prerelease \
+            dist/* sbom/* SHA256SUMS

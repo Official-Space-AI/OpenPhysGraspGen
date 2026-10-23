@@ -8,7 +8,7 @@ version = "0.1.0b0"
 description = "Physics-labelled grasp data generation for deformable objects"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "SpaceAI" }]
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
