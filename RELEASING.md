@@ -10,10 +10,14 @@ Releases are cut by pushing a version tag. The `Release` workflow
    dependencies it resolves,
 4. fails if the SBOMs miss the package or a dependency, or if a known vulnerability of
    severity high or above is found,
-5. publishes the sdist and wheel to PyPI,
+5. publishes the sdist and wheel to PyPI as `physgraspgen`,
 6. attests the build provenance and the SBOM, and creates a GitHub release with the sdist,
    wheel, both SBOMs and `SHA256SUMS` attached. Tags ending in `aN`, `bN` or `rcN` are marked
    as pre-releases.
+
+The PyPI project is `physgraspgen`, the name the funded project's plan uses
+(`pip install physgraspgen`). The package itself is renamed from `openphysgraspgen` in a
+separate pull request; the first tag waits for it.
 
 ## Cutting a release
 
@@ -27,20 +31,27 @@ Releases are cut by pushing a version tag. The `Release` workflow
    git push origin v1.0.0rc1
    ```
 
-3. Approve the `pypi` environment deployment if the run asks for it, and check that the
+3. Approve the `pypi` environment deployment when the run asks for it, and check that the
    release page has the five assets.
 
 ## Verifying a release
 
 ```sh
-gh attestation verify openphysgraspgen-1.0.0rc1-py3-none-any.whl --repo Official-Space-AI/OpenPhysGraspGen
+gh attestation verify physgraspgen-1.0.0rc1-py3-none-any.whl --repo Official-Space-AI/OpenPhysGraspGen
 ```
+
+## Keeping the workflow current
+
+Third-party actions are pinned to full commit SHAs, with the release tag in a comment.
+Dependabot (`.github/dependabot.yml`) opens a pull request each week when an action or a
+Python dependency has a new release; review it like any other change.
+`pypa/gh-action-pypi-publish` must stay at v1.14.3 or later (GHSA-5xjx-3w67-w9x9).
 
 ## One-time setup
 
-- On PyPI, add a trusted publisher for the project `openphysgraspgen`: owner
+- On PyPI, add a trusted publisher for the project `physgraspgen`: owner
   `Official-Space-AI`, repository `OpenPhysGraspGen`, workflow `release.yml`, environment
   `pypi`. Before the first upload this is a "pending publisher" under the account's
   publishing settings.
-- In the repository settings, create the environment `pypi`. Adding required reviewers to it
-  makes every upload wait for a maintainer's approval.
+- The repository has an environment `pypi` that only `v*` tags can deploy to, with a required
+  reviewer, so every upload waits for a maintainer's approval.
