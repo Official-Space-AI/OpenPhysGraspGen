@@ -107,6 +107,16 @@ layers of each frame.
 | `object.centroid`, `object.bbox_min`, `object.bbox_max` | fixed list of 3 float64 | centroid and axis-aligned bounds of the deformed object [m], world frame |
 | `object.n_soft_contacts`, `object.n_rigid_contacts`, `object.n_robot_contacts` | int32 | contacts in the collision pipeline |
 
+A frames file holds exactly the columns that its episode's `channels` and `cameras` call for, and
+no other. `episode_uid`, `frame_index`, `sim_step`, `sim_time_s`, `source_frame_index` and every
+`robot` and `object` column are always there. A channel's columns are there exactly when `channels`
+lists it, a column named with `<camera>` once for each camera of `cameras`. `cameras` lists the
+cameras given an image size when the episode carries RGB, depth or segmentation, and is empty
+otherwise; the `camera.<camera>` matrices are there for each of them. A trajectory file always has
+exactly the columns of its table. `check_dataset.frame_schema(channels, cameras, image_size)` and
+`check_dataset.trajectory_schema()`, in `physgraspgen.dataset`, build the two Arrow schemas,
+column order included.
+
 Image sizes are fixed per camera for the whole dataset and stated in `metadata.yaml` and in every
 episode's metadata. The tetrahedron count T is fixed per episode and stated in the episode
 metadata. No column holds nulls.
@@ -121,6 +131,8 @@ deformation gradient (N, T, 3, 3).
 
 ### Values
 
+- Every `<layer>.sim_step` equals the frame's `sim_step`: all the layers of a frame are captured at
+  one step.
 - Every float value of the `robot`, `object`, `camera`, `force` and `deformation_gradient` columns,
   contact forces and points included, is finite, except `robot.grip_contact_width_m`, which is
   finite or NaN.
@@ -128,9 +140,11 @@ deformation gradient (N, T, 3, 3).
 - `camera.<camera>.intrinsics` is a pinhole K: `K[0][1]` (skew) and `K[1][0]` are 0, the last row
   is `0 0 1` and both focal lengths are positive.
 - `camera.<camera>.world_to_camera` is a rigid transform: its last row is `0 0 0 1`, and its
-  rotation R satisfies `R R^T = I` and `det R = +1` to within 1e-6.
-- Depth, the masks and `stress.volume_ratio` have no rule beyond their type; a mask value is one of
-  the segmentation classes.
+  rotation R satisfies `R R^T = I` and `det R = +1` to within 1e-6. A rotation computed in
+  float32, or composed of float32 rotations, can miss that, so compute R in float64, for example
+  from a normalized quaternion.
+- A mask value is the index of a segmentation class, 0 to 5. Depth and `stress.volume_ratio` have
+  no rule beyond their type.
 
 ## Trajectory file
 
@@ -204,7 +218,7 @@ its simulation time. RGB is the only lossy channel; every other channel is store
 | Container | MP4, not fragmented, one video track |
 | Codec | AV1, an `av01` sample entry |
 | Pixel format | 8-bit 4:2:0 (yuv420p), as the sample entry's `av1C` box states |
-| Frame size | the camera's `image_size` |
+| Frame size | the camera's `image_size`, whose height and width are even when the dataset has RGB (4:2:0 halves both for colour) |
 | Frame rate | the dataset's `fps`, constant |
 | Frames | the episode's `n_frames` |
 | Encoder settings | stated in `metadata.yaml` (`video`) |
@@ -268,6 +282,9 @@ git checkout keeps the bytes that are hashed whatever its line-ending settings, 
 
 ## Conventions
 
+- **World frame.** Right-handed, z up, so gravity points along -z. Positions, poses, forces and
+  contact points are in the world frame unless their column says otherwise, and every quantity is
+  in SI units: metres, seconds, newtons, pascals and radians.
 - **Cameras.** `front` is fixed in the scene, `wrist` is mounted on the end effector. A pixel
   (u, v), u the column and v the row, sees the world point X where `[u, v, 1]^T ~ K (R X + t)`
   and `[R t]` is the top of `world_to_camera`: x right, y down, z forward. Pixel centres are at
@@ -289,10 +306,10 @@ passes only with the criteria file and the script whose sha256 `metadata.yaml` l
 
 ## Writing and reading
 
-`pip install "physgraspgen[dataset]"` adds PyArrow and PyYAML, which writing and reading both
-need. Writing RGB also needs an `ffmpeg` executable on the `PATH` whose `ffmpeg -encoders` lists
-`libsvtav1` (SVT-AV1); the recorder checks this when it is created. Reading RGB with `read_video` needs an ffmpeg with an AV1 decoder, such as libdav1d;
-reading every other channel needs no ffmpeg.
+`pip install "physgraspgen[dataset]"` adds PyArrow and PyYAML, which writing and reading both need.
+Writing RGB also needs an `ffmpeg` executable on the `PATH` whose `ffmpeg -encoders` lists
+`libsvtav1` (SVT-AV1); the recorder checks this when it is created. Reading RGB with `read_video`
+needs an ffmpeg with an AV1 decoder, such as libdav1d; reading every other channel needs no ffmpeg.
 
 ```python
 from physgraspgen.dataset import DatasetSpec, GraspDataRecorder, read_frames
@@ -323,17 +340,17 @@ recorder.finalize()  # once every episode is written
 data = read_frames("dataset/data/apple/apple-0001.parquet", columns=["object.centroid"])
 ```
 
-A frame gives every column of the frames file except those the writer fills in
-(`episode_uid`, `frame_index`, `sim_time_s`, `force.n_contacts`, the video frame indices and the
-per-channel steps, which default to the frame's `sim_step`); `source_frame_index` is required. RGB
-is given as `rgb.<camera>.image`, (H, W, 3) uint8, the contacts as `force.contact_force`,
+A frame gives every column of the frames file except those the writer fills in (`episode_uid`,
+`frame_index`, `sim_time_s`, `force.n_contacts`, the video frame indices and the per-channel steps,
+which may be given but must equal the frame's `sim_step`); `source_frame_index` is required. RGB is
+given as `rgb.<camera>.image`, (H, W, 3) uint8, the contacts as `force.contact_force`,
 `force.contact_point_world`, `force.contact_particle`, `force.contact_is_ground` and
-`force.contact_is_robot`, one row per contact, and the camera matrices as 3 x 3 and 4 x 4 arrays.
-A step gives every column of the trajectory file except `episode_uid` and `sim_time_s`. Where a
-value may be NaN, it may also be given as None. The writer copies what it keeps, so a caller may
-refill one set of arrays for every frame and step. A frame or a step that does not follow the
-format, its value rules included, is refused before anything of it is written; so is a float64
-value too large for a float32 column.
+`force.contact_is_robot`, one row per contact, and the camera matrices as 3 x 3 and 4 x 4 arrays. A
+step gives every column of the trajectory file except `episode_uid` and `sim_time_s`. Where a value
+may be NaN, it may also be given as None. The writer copies what it keeps, so a caller may refill
+one set of arrays for every frame and step. A frame or a step that does not follow the format, its
+value rules included, is refused before anything of it is written; so is a float64 value too large
+for a float32 column.
 
 An episode is written to `.part` files that are renamed only when every file of the episode is
 complete, the frames file last. The writer claims the episode by creating its frames `.part` file,

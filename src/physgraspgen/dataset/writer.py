@@ -395,7 +395,11 @@ class EpisodeWriter:
 
     def add_frame(self, frame: Mapping[str, Any]) -> None:
         """One published frame. Frames are consecutive on the fps grid: each one's
-        sim_step is the previous one's plus recorded_fps / fps."""
+        sim_step is the previous one's plus recorded_fps / fps.
+
+        camera.<camera>.world_to_camera must be rigid to within 1e-6, which a rotation
+        computed in float32 can miss: compute it in float64.
+        """
         if self._done:
             raise RuntimeError("the episode is closed")
         keys = set(frame)
