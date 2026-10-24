@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
+# SPDX-License-Identifier: Apache-2.0
 # Acceptance values of the physgraspgen-public 2.0 check, tools/check_dataset.py.
 # metadata.yaml lists this file and the script with their sha256, and a run passes only
 # with both, so a run applies the values the dataset was published with.

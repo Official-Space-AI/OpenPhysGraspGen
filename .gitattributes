@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
+# SPDX-License-Identifier: Apache-2.0
 # Every dataset ships these two files and states their sha256: keep their bytes.
 src/openphysgraspgen/dataset/check_dataset.py -text
 src/openphysgraspgen/dataset/check_criteria.yaml -text
