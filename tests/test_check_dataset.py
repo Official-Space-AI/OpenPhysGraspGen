@@ -2374,6 +2374,7 @@ def test_the_download_url_is_an_https_url(root, url, ok):
     write_meta(root, metadata)
     spec = check(root, items=("metadata",))["items"]["metadata"]["spec"]
     assert spec["checks"]["download_url"] is ok
+    assert spec["pass"] is ok
 
 
 def test_the_specification_needs_every_channel_camera_and_the_licence(root, tmp_path):
@@ -2751,6 +2752,8 @@ def test_contacts_that_press_nothing_are_no_candidates(scenes, tmp_path):
     values, _digest = fmt.load_criteria(path)
     proj = projection(fmt.run_checks(root, values, items=("consistency",), seed=SEED))
     assert (proj["n_candidates"], proj["n_sampled"], proj["n_pass"]) == (2, 2, 2)
+    # Exactly the minimum of candidates is enough.
+    assert proj["pass"]
 
 
 def test_contacts_without_force_or_off_the_robot_press_nothing(root):
@@ -2945,6 +2948,76 @@ def test_diversity_finds_types_assets_and_episodes_that_are_one():
     assert not result["pass"]
 
 
+PROBLEMS = (
+    "files_not_read",
+    "files_without_type",
+    "label_collisions",
+    "assets_under_several_types",
+    "episodes_in_several_files",
+    "files_missing_facts",
+)
+
+
+@pytest.mark.parametrize(
+    ("records", "found"),
+    [
+        (
+            [("data/apple/ep-0.parquet", {}), ("data/pear/ep-1.parquet", None)],
+            {"files_not_read": ["data/pear/ep-1.parquet"]},
+        ),
+        (
+            [
+                ("data/apple/ep-0.parquet", {}),
+                ("data/plum/ep-1.parquet", {"object_type": "Plum"}),
+            ],
+            {"files_without_type": ["data/plum/ep-1.parquet"]},
+        ),
+        (
+            [("data/Apple/ep-0.parquet", {}), ("data/apple/ep-1.parquet", {})],
+            {"label_collisions": {"apple": ["Apple", "apple"]}},
+        ),
+        (
+            [
+                ("data/apple/ep-0.parquet", {"object_asset": "shared"}),
+                ("data/pear/ep-1.parquet", {"object_asset": "shared"}),
+            ],
+            {"assets_under_several_types": {"shared": ["apple", "pear"]}},
+        ),
+        (
+            [("data/apple/ep-0.parquet", {}), ("data/pear/ep-0.parquet", {})],
+            {
+                "episodes_in_several_files": {
+                    "ep-0": ["data/apple/ep-0.parquet", "data/pear/ep-0.parquet"]
+                }
+            },
+        ),
+        (
+            [
+                (
+                    "data/apple/ep-0.parquet",
+                    {"facts": {k: {"x": 1} for k in fmt.FACT_KINDS if k != "camera"}},
+                )
+            ],
+            {
+                "files_missing_facts": [
+                    {"file": "data/apple/ep-0.parquet", "missing": ["camera"]}
+                ]
+            },
+        ),
+    ],
+)
+def test_each_diversity_problem_alone_fails_the_item(records, found):
+    built = []
+    for rel, footer in records:
+        built.append(typed(rel, footer or {}))
+        built[-1].opened = footer is not None
+    result = diversity(built)
+    assert {key: result[key] for key in PROBLEMS if result[key]} == found
+    # The types alone reach the minimum: the problem is what fails the item.
+    assert result["n_object_types"] >= 1
+    assert not result["pass"]
+
+
 @pytest.mark.parametrize(
     ("facts", "missing"),
     [
@@ -3011,6 +3084,20 @@ def test_diversity_tabulates_every_variable_of_the_facts():
     assert [r["value"] for r in rig] == ["c", "b", "other (1 values)"]
     assert tables["placement.on"]["kind"] == "categorical"
     assert diversity(records)["labels"]["success"]["n_episodes"] == 3
+
+
+def test_log_spaced_bins_start_at_their_ratio():
+    def record(i, at, below):
+        facts = {k: {"x": 1} for k in fmt.FACT_KINDS}
+        facts["material"] = {"at": at, "below": below}
+        return typed(f"data/t{i}/ep-{i}.parquet", {"facts": facts})
+
+    records = [record(0, 1.0, 1.0), record(1, 30.0, 29.97)]
+    tables = diversity(records, log_bins_min_ratio=30.0)["tables"]
+    # 30 / 1 is the ratio: four bins spaced by the fourth root of 30.
+    assert tables["material.at"]["rows"][0]["bin"] == "[1, 2.34035]"
+    # 29.97 / 1 is below it: four bins of equal width.
+    assert tables["material.below"]["rows"][0]["bin"] == "[1, 8.2425]"
 
 
 def test_diversity_reports_files_not_read(root):

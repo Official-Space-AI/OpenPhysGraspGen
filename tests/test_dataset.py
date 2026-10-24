@@ -1172,6 +1172,9 @@ def test_finalize_refuses_a_folder_the_hub_cannot_hold(tmp_path, monkeypatch):
         DatasetError, match="data/apple holds 2 files; the Hub allows 1 in a folder"
     ):
         recorder.finalize()
+    # A folder of exactly the limit is held.
+    monkeypatch.setattr(finalize_module, "MAX_FOLDER_FILES", 2)
+    assert recorder.finalize()["counts"]["n_files"] == 4
 
 
 def test_finalize_states_no_classes_without_masks(tmp_path):
