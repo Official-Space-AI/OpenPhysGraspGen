@@ -10,6 +10,7 @@ path = [
     ".github/**",
     ".gitignore",
     "CHANGELOG.md",
+    "COMMUNITY.md",
     "CONTRIBUTING.md",
     "GOVERNANCE.md",
     "NOTICE",
