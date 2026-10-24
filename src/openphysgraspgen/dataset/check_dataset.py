@@ -3,8 +3,8 @@
 """The public dataset's format, in the file that ships with every dataset.
 
 Every dataset carries this file as ``tools/check_dataset.py``, so it imports nothing
-from ``physgraspgen`` and needs only Python 3.10 or newer, NumPy, PyArrow and PyYAML.
-``physgraspgen.dataset`` imports the format from here, so the writer and the check
+from ``openphysgraspgen`` and needs only Python 3.10 or newer, NumPy, PyArrow and PyYAML.
+``openphysgraspgen.dataset`` imports the format from here, so the writer and the check
 cannot disagree about a file, a column or a value rule. The format is documented in
 ``docs/dataset/format.md``.
 """

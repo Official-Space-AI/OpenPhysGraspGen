@@ -3,9 +3,9 @@
 Status: draft for review (format `physgraspgen-public`, version `2.0`).
 
 The project publishes a soft-body grasping dataset on the Hugging Face Hub under CC-BY-4.0, with a
-Zenodo DOI. This page defines its files. The `physgraspgen.dataset` module writes and reads them,
-and the dataset's own check script tests them, so the writer, the reader and the check share one
-definition. Version 2.0 replaces an unpublished HDF5 draft (1.0) with Parquet and MP4.
+Zenodo DOI. This page defines its files. The `openphysgraspgen.dataset` module writes and reads
+them, and the dataset's own check script tests them, so the writer, the reader and the check share
+one definition. Version 2.0 replaces an unpublished HDF5 draft (1.0) with Parquet and MP4.
 
 ## What the format has to serve
 
@@ -58,8 +58,8 @@ configs:
 ---
 ```
 
-`physgraspgen.dataset.card_front_matter()` returns this text for an exporter to put at the top of
-its card. Finalize does not write `README.md`, and does not hash it.
+`openphysgraspgen.dataset.card_front_matter()` returns this text for an exporter to put at the top
+of its card. Finalize does not write `README.md`, and does not hash it.
 
 ## Frames file
 
@@ -114,7 +114,7 @@ lists it, a column named with `<camera>` once for each camera of `cameras`. `cam
 cameras given an image size when the episode carries RGB, depth or segmentation, and is empty
 otherwise; the `camera.<camera>` matrices are there for each of them. A trajectory file always has
 exactly the columns of its table. `check_dataset.frame_schema(channels, cameras, image_size)` and
-`check_dataset.trajectory_schema()`, in `physgraspgen.dataset`, build the two Arrow schemas,
+`check_dataset.trajectory_schema()`, in `openphysgraspgen.dataset`, build the two Arrow schemas,
 column order included.
 
 Image sizes are fixed per camera for the whole dataset and stated in `metadata.yaml` and in every
@@ -306,13 +306,13 @@ passes only with the criteria file and the script whose sha256 `metadata.yaml` l
 
 ## Writing and reading
 
-`pip install "physgraspgen[dataset]"` adds PyArrow and PyYAML, which writing and reading both need.
-Writing RGB also needs an `ffmpeg` executable on the `PATH` whose `ffmpeg -encoders` lists
+`pip install "openphysgraspgen[dataset]"` adds PyArrow and PyYAML, which writing and reading both
+need. Writing RGB also needs an `ffmpeg` executable on the `PATH` whose `ffmpeg -encoders` lists
 `libsvtav1` (SVT-AV1); the recorder checks this when it is created. Reading RGB with `read_video`
 needs an ffmpeg with an AV1 decoder, such as libdav1d; reading every other channel needs no ffmpeg.
 
 ```python
-from physgraspgen.dataset import DatasetSpec, GraspDataRecorder, read_frames
+from openphysgraspgen.dataset import DatasetSpec, GraspDataRecorder, read_frames
 
 spec = DatasetSpec(
     name="physgraspgen-dataset",

@@ -21,7 +21,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
 
-from physgraspgen.dataset import (
+from openphysgraspgen.dataset import (
     DatasetError,
     DatasetSpec,
     GraspDataRecorder,
@@ -34,9 +34,9 @@ from physgraspgen.dataset import (
     read_video,
     video_tracks,
 )
-from physgraspgen.dataset import check_dataset as fmt
-from physgraspgen.dataset import video as video_module
-from physgraspgen.dataset import writer as writer_module
+from openphysgraspgen.dataset import check_dataset as fmt
+from openphysgraspgen.dataset import video as video_module
+from openphysgraspgen.dataset import writer as writer_module
 
 # A non-square image, so that a swapped width and height cannot pass.
 H, W = 64, 96

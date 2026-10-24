@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from physgraspgen import DeformableContactSensor, SensorRecorder, SimFrame
+from openphysgraspgen import DeformableContactSensor, SensorRecorder, SimFrame
 
 RADIUS = 0.01
 CONTACT_KE = 1.0e4
