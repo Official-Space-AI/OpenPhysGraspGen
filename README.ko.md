@@ -81,10 +81,16 @@ PhysGraspGen의 일상 개발은 고객별 코드가 함께 있는 비공개 저
 공개적으로 계획하고 리뷰합니다. 모든 변경은 이슈에서 시작해 리뷰를 거친 pull
 request로 들어오고, 릴리스는 릴리스 노트와 SBOM을 붙여 배포합니다.
 
-## 의견 보내기
+## 커뮤니티와 지원
 
-버그 신고와 질문은 [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)에
-남겨 주세요. 한국어로 써도 됩니다. 기여 가이드, 행동 강령, 보안 정책은 추가하는 중입니다.
+- 질문·아이디어: [GitHub Discussions](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions)
+- 버그: [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)
+- 어디에 무엇을 물어야 하는지, 응답 시간: [COMMUNITY.md](COMMUNITY.md)
+- 보안 취약점: [SECURITY.md](SECURITY.md) (공개 이슈로 올리지 마세요)
+
+기여는 [CONTRIBUTING.md](CONTRIBUTING.md)부터 읽어 주세요. 참여하는 모든 사람은
+[행동 강령](CODE_OF_CONDUCT.md)을 따릅니다. 역할과 결정 방식, 릴리스 승인 절차는
+[GOVERNANCE.md](GOVERNANCE.md)에 있습니다. 질문과 이슈는 한국어로 써도 됩니다.
 
 ## 라이선스
 

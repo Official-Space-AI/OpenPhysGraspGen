@@ -132,11 +132,17 @@ the project's. From now on, work on the open library is planned and reviewed her
 in public: every change starts as an issue and lands through a reviewed pull
 request, and releases ship with release notes and an SBOM.
 
-## Feedback
+## Community and support
 
-Bug reports and questions are welcome as
-[GitHub issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues).
-Contribution guidelines, a code of conduct and a security policy are being added.
+- Questions and ideas: [GitHub Discussions](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions)
+- Bugs: [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)
+- Where to ask what, and response times: [COMMUNITY.md](COMMUNITY.md)
+- Security vulnerabilities: [SECURITY.md](SECURITY.md) (please do not open a public issue)
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[`good first issue`](https://github.com/Official-Space-AI/OpenPhysGraspGen/labels/good%20first%20issue)
+label. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Who
+decides what, and how releases are approved, is in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## License
 
