@@ -2780,6 +2780,22 @@ def test_criteria_given_as_values_must_be_the_datasets_own(root):
     assert not report["pass"]
 
 
+def test_criteria_given_with_a_path_alone_must_be_that_files(root):
+    path = root / CRITERIA
+    criteria, digest = fmt.load_criteria(path)
+    report = fmt.run_checks(root, criteria, seed=SEED, criteria_path=path)
+    assert report["published_tools"]["criteria"]["sha256"] == digest
+    assert report["pass"]
+    criteria["scale"]["min_frames"] = 1
+    criteria["diversity"]["min_object_types"] = 1
+    report = fmt.run_checks(root, criteria, seed=SEED, criteria_path=path)
+    assert all(report["items"][item]["pass"] for item in fmt.ITEMS)
+    # The values applied were read from no bytes the file holds.
+    assert report["published_tools"]["criteria"]["sha256"] is None
+    assert not report["published_tools"]["criteria"]["matches_published"]
+    assert not report["pass"]
+
+
 def test_a_tool_that_is_not_listed_fails_the_run(root):
     metadata = read_meta(root)
     metadata["tools"] = [t for t in metadata["tools"] if t["path"] != CRITERIA]

@@ -3922,9 +3922,11 @@ def run_checks(
 
     The verdict needs every item run to pass and the run to apply the criteria file and
     run the script that metadata.yaml publishes. criteria_path is the file the criteria
-    were read from (criteria_sha256 the digest of the bytes read); without one the
-    criteria must equal the dataset's own. seed, the tester's, draws the consistency
-    samples and is required when that item runs; sample overrides their size.
+    were read from, and criteria_sha256 the digest of the bytes they were read from;
+    given a path alone, the file is read, and its digest counts only when it holds the
+    criteria. Without a path the criteria must equal the dataset's own. seed, the
+    tester's, draws the consistency samples and is required when that item runs; sample
+    overrides their size.
     """
     if script_sha256 is None:
         script_sha256 = sha256_file(Path(__file__).resolve())[0]
@@ -3945,7 +3947,10 @@ def run_checks(
         raise CheckError(f"a sample of {sample!r} frames is not one of at least 1")
     validate_criteria(criteria, items)
     if criteria_path is not None and criteria_sha256 is None:
-        criteria_sha256 = load_criteria(criteria_path)[1]
+        loaded, criteria_sha256 = load_criteria(criteria_path)
+        if loaded != criteria:
+            # Criteria that are not the file's were read from no bytes it holds.
+            criteria_sha256 = None
     metadata, metadata_sha256 = read_metadata(root)
     ds = read_dataset(
         root, metadata, workers=workers, checksums=checksums, progress=progress
