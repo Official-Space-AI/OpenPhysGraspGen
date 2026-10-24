@@ -16,8 +16,7 @@ Releases are cut by pushing a version tag. The `Release` workflow
    as pre-releases.
 
 The PyPI project is `physgraspgen`, the name the funded project's plan uses
-(`pip install physgraspgen`). The package itself is renamed from `openphysgraspgen` in a
-separate pull request; the first tag waits for it.
+(`pip install physgraspgen`). The package was renamed from `openphysgraspgen` in #13.
 
 ## Cutting a release
 
