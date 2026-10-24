@@ -517,6 +517,8 @@ BAD_CRITERIA = [
         "[consistency] min_pass_fraction is 1.5, not a number",
     ),
     ({"min_pass_fraction": ".nan"}, "[consistency] min_pass_fraction is nan, not a"),
+    # Beyond the float range, which the check computes in.
+    ({"min_pass_fraction": "1" + "0" * 400}, "[consistency] min_pass_fraction is 1000"),
     ({"layers": "[]"}, "[consistency] layers is [], not a nonempty list"),
     ({"layers": "rgb"}, "[consistency] layers is 'rgb', not a nonempty list"),
     ({"sample_frames": "0"}, "[consistency] sample_frames is 0, not an integer"),
@@ -1140,6 +1142,14 @@ FOOTERS = [
         "metadata object_asset is ' ', not a nonempty string",
     ),
     (
+        lambda f: {**f, "object_asset": ["x"]},
+        "metadata object_asset is ['x'], not a nonempty string",
+    ),
+    (
+        lambda f: {**f, "object_asset": {"a": 1}},
+        "metadata object_asset is {'a': 1}, not a nonempty string",
+    ),
+    (
         lambda f: {**f, "label": "won"},
         "metadata label is 'won', not one of success, fracture, fail, unknown",
     ),
@@ -1187,6 +1197,14 @@ FOOTERS = [
     (
         lambda f: {**f, "ffmpeg_version": ""},
         "metadata ffmpeg_version is '', not a nonempty string with rgb",
+    ),
+    (
+        lambda f: {**f, "ffmpeg_version": ["x"]},
+        "metadata ffmpeg_version is ['x'], not a nonempty string with rgb",
+    ),
+    (
+        lambda f: {**f, "ffmpeg_version": {"a": 1}},
+        "metadata ffmpeg_version is {'a': 1}, not a nonempty string with rgb",
     ),
     (
         lambda f: {
@@ -2040,6 +2058,25 @@ def test_a_tool_listed_but_missing_is_a_mismatch(root):
     assert not report["published_tools"]["pass"]
 
 
+@pytest.mark.parametrize("value", [["x"], {"a": 1}])
+@pytest.mark.parametrize("key", ["object_asset", "ffmpeg_version"])
+def test_a_footer_value_that_is_no_string_fails_its_file_not_the_run(
+    root, capsys, key, value
+):
+    # banana's one episode: no other file names its asset.
+    set_footer(root, lambda f: {**f, key: value}, "banana", "ep-2")
+    code, out, _, payload = main(capsys, root, "--seed", SEED)
+    assert code == 1
+    assert payload["scale"]["n_files_with_errors"] == 1
+    assert '{"file": "data/banana/ep-2.parquet", "kind": "frames"' in out
+    # The other episodes were encoded by the same ffmpeg build.
+    assert mismatches(check(root)) == (
+        ["counts.n_object_assets", "object_types.banana.assets"]
+        if key == "object_asset"
+        else []
+    )
+
+
 def test_mismatches_of_an_unread_file_hold_no_none(root):
     flip(root / APPLE)
     report = check(root)
@@ -2210,19 +2247,36 @@ def test_layers_can_be_any_channels(root, tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("stated", "counted"), [(4, 4), (-3, 0), ("4", 0), (None, 0), (True, 0)]
+    ("stated", "counted"),
+    [
+        (4, 4),
+        (-3, 0),
+        ("4", 0),
+        (None, 0),
+        (True, 0),
+        pytest.param(10**400, 10**400, id="beyond-float"),
+    ],
 )
-def test_a_file_without_a_frame_count_keeps_its_stated_frames(root, stated, counted):
+def test_a_file_without_a_frame_count_keeps_its_stated_frames(
+    root, capsys, stated, counted
+):
     flip(root / APPLE)
     metadata = read_meta(root)
     entry(APPLE)(metadata)["n_frames"] = stated
     write_meta(root, metadata)
     steps = check(root)["items"]["consistency"]["steps"]
-    assert steps["n_frames"] == N_FRAMES - 3 + counted
+    n_frames = N_FRAMES - 3 + counted
+    assert steps["n_frames"] == n_frames
     assert steps["n_pass"] == N_FRAMES - 3
     assert steps["files_without_frame_count"][0]["frames_stated"] == counted
     assert steps["failed_by_reason"]["files without a frame count, or missing"] == 1
     assert not steps["pass"]
+    # A count beyond the float range is reported too.
+    code, out, _, payload = main(capsys, root, "--seed", SEED)
+    assert code == 1
+    assert payload["consistency"]["steps"]["n_frames"] == n_frames
+    pct = 100 * (N_FRAMES - 3) / n_frames
+    assert f"steps {N_FRAMES - 3:,}/{n_frames:,} frames ({pct:.2f} %)" in out
 
 
 def test_a_listed_frames_file_missing_from_disk_keeps_its_frames(root):

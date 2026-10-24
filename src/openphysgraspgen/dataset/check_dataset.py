@@ -1284,10 +1284,14 @@ def _names(
 def _number(
     value: object, low: float, high: float | None = None, above: bool = False
 ) -> bool:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:  # an integer the check cannot apply as a float
+        return False
     return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
+        finite
         and (value > low if above else value >= low)
         and (high is None or value <= high)
     )
@@ -2717,6 +2721,12 @@ def _footer_cameras(rec: DataFile) -> list[str]:
     return list(rec.footer["cameras"]) if rec.sizes is not None else []
 
 
+def _footer_strings(records: Iterable[DataFile], key: str) -> set[str]:
+    """The distinct strings of a footer key: a value of another type is an error of its
+    file (footer_errors), not a value to count."""
+    return {value for rec in records if isinstance(value := rec.footer.get(key), str)}
+
+
 def _distinct(records: Iterable[Mapping[str, Any] | None]) -> list[Any]:
     out: dict[str, Any] = {}
     for record in records:
@@ -2774,13 +2784,12 @@ def check_metadata(
     ledger.compare("format_version", metadata.get("format_version"), FORMAT_VERSION)
     frames = _frames_files(ds)
     read = [rec for rec in frames if rec.footer is not None]
-    assets = {rec.footer.get("object_asset") for rec in read}
     counted = {
         "n_frames": sum(rec.n_rows or 0 for rec in frames),
         "n_episodes": len({rec.id.episode_uid for rec in frames}),
         "n_files": len(ds.files),
         "n_object_types": len({rec.id.object_type for rec in frames}),
-        "n_object_assets": len({a for a in assets if isinstance(a, str)}),
+        "n_object_assets": len(_footer_strings(read, "object_asset")),
     }
     counts = metadata.get("counts")
     counts = counts if isinstance(counts, dict) else {}
@@ -2859,11 +2868,10 @@ def check_metadata(
         ):
             ledger.compare(f"{rec.rel}: {key}", value, footer.get(key))
     if isinstance(video, dict):
-        builds = {rec.footer.get("ffmpeg_version") for rec in read}
         ledger.compare(
             "video.ffmpeg_versions",
             video.get("ffmpeg_versions"),
-            sorted(b for b in builds if isinstance(b, str)),
+            sorted(_footer_strings(read, "ffmpeg_version")),
         )
     ledger.compare(
         "provenance",
@@ -4006,7 +4014,8 @@ def _measured(item: str, r: Mapping[str, Any]) -> tuple[str, str]:
         return text, f"<= {r['criterion']['max_mismatches']} mismatches, and spec"
     if item == "consistency":
         steps, proj, crit = r["steps"], r["projection"], r["criterion"]
-        pct = 100.0 * steps["n_pass"] / steps["n_frames"] if steps["n_frames"] else 0.0
+        # In integers: a count metadata.yaml states can be beyond the float range.
+        pct = 100 * steps["n_pass"] / steps["n_frames"] if steps["n_frames"] else 0.0
         override = (
             f", sample overridden to {proj['sample_override']}"
             if proj["sample_override"] is not None
