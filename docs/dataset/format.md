@@ -205,11 +205,11 @@ with recorder.episode(
     facts=facts,
     task=task,
 ) as episode:
-    for frame in frames:    # published frames: a mapping from column name to value
+    for frame in frames:  # published frames: a mapping from column name to value
         episode.add_frame(frame)
-    for step in steps:      # every recorded step, for the trajectory file
+    for step in steps:  # every recorded step, for the trajectory file
         episode.add_step(step)
-recorder.finalize()         # metadata.yaml and SHA256SUMS, once every episode is written
+recorder.finalize()  # metadata.yaml and SHA256SUMS, once every episode is written
 
 data = read_frames("dataset/data/apple/apple-0001.parquet", columns=["object.centroid"])
 ```
