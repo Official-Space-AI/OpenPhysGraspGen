@@ -13,7 +13,7 @@ import pyarrow.parquet as pq
 import yaml
 
 from . import check_dataset as fmt
-from .writer import CONTACT_INPUTS, MATRIX_SHAPES
+from .writer import CONTACT_INPUTS
 
 
 def read_metadata(root: str | Path) -> dict[str, Any]:
@@ -53,8 +53,7 @@ def _numpy(
             if shape[1] == 1
             else result.reshape(n, -1, 3, 3)
         )
-    matrix = MATRIX_SHAPES.get(name.rsplit(".", 1)[1])
-    return result.reshape(n, *matrix) if matrix else result
+    return result.reshape(n, *shape)
 
 
 def _contacts(array: pa.Array) -> dict[str, np.ndarray]:
@@ -97,9 +96,10 @@ def read_frames(
 ) -> dict[str, np.ndarray]:
     """An episode's frames as arrays with their shapes restored.
 
-    Images are (N, H, W), per-tetrahedron values (N, T) and the deformation gradient
-    (N, T, 3, 3). ``force.contacts`` becomes ``force.contact_offset`` and one flat
-    array per contact field, as the writer takes them.
+    Images are (N, H, W), per-tetrahedron values (N, T), the deformation gradient
+    (N, T, 3, 3) and the camera matrices (N, 3, 3) and (N, 4, 4). ``force.contacts``
+    becomes ``force.contact_offset`` and one flat array per contact field, as the
+    writer takes them.
     """
     meta = episode_metadata(path)
     spec = fmt.frame_columns(tuple(meta["channels"]), tuple(meta["cameras"]))

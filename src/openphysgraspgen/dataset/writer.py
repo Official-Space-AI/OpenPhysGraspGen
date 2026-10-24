@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import operator
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 import numpy as np
 import pyarrow as pa
@@ -16,7 +17,7 @@ import pyarrow.parquet as pq
 
 from . import check_dataset as fmt
 from .finalize import finalize_dataset
-from .video import VideoEncoder, VideoSpec, ffmpeg_version, find_ffmpeg
+from .video import VideoEncoder, VideoSpec, check_encoder, ffmpeg_version, find_ffmpeg
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -29,8 +30,6 @@ CONTACT_INPUTS = {
     "force.contact_is_ground": "is_ground",
     "force.contact_is_robot": "is_robot",
 }
-# Columns given as matrices and stored flat.
-MATRIX_SHAPES = {"intrinsics": (3, 3), "world_to_camera": (4, 4)}
 
 
 @dataclass(frozen=True)
@@ -129,46 +128,6 @@ def _part(path: Path) -> Path:
     return path.with_name(path.name + ".part")
 
 
-def _shape_metadata(shape: object, size: tuple[int, int] | None) -> dict[str, str]:
-    if shape == "image":
-        return {"shape": json.dumps(list(size or ()))}
-    if isinstance(shape, tuple) and shape and shape[0] == "tets":
-        return {"shape": json.dumps(["n_tets"] if shape[1] == 1 else ["n_tets", 3, 3])}
-    if isinstance(shape, tuple) and shape:
-        return {"shape": json.dumps(list(shape))}
-    return {}
-
-
-def frame_schema(spec: DatasetSpec) -> pa.Schema:
-    fields = []
-    for name, (dtype, shape) in fmt.frame_columns(spec.channels, spec.cameras).items():
-        camera = fmt.column_camera(name)
-        size = spec.image_size.get(camera) if camera else None
-        fields.append(
-            pa.field(
-                name,
-                fmt.arrow_type(dtype, shape, size),
-                nullable=False,
-                metadata=_shape_metadata(shape, size) or None,
-            )
-        )
-    return pa.schema(fields)
-
-
-def trajectory_schema() -> pa.Schema:
-    return pa.schema(
-        [
-            pa.field(
-                name,
-                fmt.arrow_type(dtype, shape),
-                nullable=False,
-                metadata=_shape_metadata(shape, None) or None,
-            )
-            for name, (dtype, shape) in fmt.TRAJECTORY_COLUMNS.items()
-        ]
-    )
-
-
 def _leaves(schema: pa.Schema) -> list[tuple[str, str]]:
     """The Parquet leaf columns of a schema: (path, physical type)."""
     sink = pa.BufferOutputStream()
@@ -187,15 +146,19 @@ def _writer_options(schema: pa.Schema, spec: DatasetSpec) -> dict[str, Any]:
         for f in schema
         if not pa.types.is_list(f.type) and not pa.types.is_fixed_size_list(f.type)
     ]
+    masks = {f.name for f in schema if f.name.endswith(".mask")}
     return {
         "compression": "zstd",
         "compression_level": spec.zstd_level,
-        # Dictionary pages inflate wide float columns; only the text columns repeat.
-        "use_dictionary": [f.name for f in schema if pa.types.is_string(f.type)],
+        # Dictionary pages inflate wide float columns. Text repeats, and Parquet has no
+        # 8-bit type: a mask pixel is a 4-byte value unless its few classes are coded.
+        "use_dictionary": [f.name for f in schema if pa.types.is_string(f.type)]
+        + [path for path, _ in leaves if path.split(".list.")[0] in masks],
         "use_byte_stream_split": [
             path for path, kind in leaves if kind in ("FLOAT", "DOUBLE")
         ],
         "write_statistics": scalars,
+        "write_page_checksum": True,
     }
 
 
@@ -224,30 +187,50 @@ def _dumps(value: Any, what: str) -> str:
 
 
 def _cast(name: str, array: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    """A copy of array in dtype; refused when a value does not fit."""
     if dtype.kind == "f":
         if array.dtype.kind not in "fiu":
             raise ValueError(f"{name} must be numeric")
-        return array.astype(dtype, copy=False)
+        with np.errstate(over="ignore"):
+            result = np.array(array, dtype=dtype)
+        if (
+            array.dtype.kind == "f"
+            and array.dtype.itemsize > dtype.itemsize
+            and (np.isinf(result) & np.isfinite(array)).any()
+        ):
+            raise ValueError(f"{name} does not fit {dtype}")
+        return result
     if dtype.kind == "b":
-        if array.dtype.kind == "b":
-            return array
-        if array.dtype.kind in "iu" and np.isin(array, (0, 1)).all():
-            return array.astype(bool)
+        if array.dtype.kind == "b" or (
+            array.dtype.kind in "iu" and np.isin(array, (0, 1)).all()
+        ):
+            return np.array(array, dtype=bool)
         raise ValueError(f"{name} must be boolean")
     if array.dtype.kind not in "iu":
         raise ValueError(f"{name} must be integers")
     info = np.iinfo(dtype)
     if array.size and (array.min() < info.min or array.max() > info.max):
         raise ValueError(f"{name} does not fit {dtype}")
-    return array.astype(dtype, copy=False)
+    return np.array(array, dtype=dtype)
 
 
 def _value(name: str, value: Any, dtype: str, expected: tuple[int, ...] | None) -> Any:
-    """A column's value as stored: a Python scalar, a string or a flat array."""
+    """A column's value as stored: a Python scalar, a string or a flat array copy.
+
+    None stands for NaN in a float column that a value rule covers, and the rule decides
+    whether NaN is allowed there.
+    """
     if dtype == "string":
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"{name} must be a nonempty string")
+        problem = fmt.text_error(value)
+        if problem:
+            raise ValueError(f"{name} {problem}")
         return value
+    if (
+        value is None
+        and dtype.startswith("float")
+        and name.split(".", 1)[0] in fmt.FINITE_GROUPS
+    ):
+        value = np.full(expected or (), np.nan)
     array = np.asarray(value)
     if expected is None:
         if array.shape != ():
@@ -273,8 +256,41 @@ def _arrow(
     return pa.ListArray.from_arrays(pa.array(offsets), flat)
 
 
+def _claim(files: EpisodeFiles, uid: str, overwrite: bool) -> IO[bytes]:
+    """Create the episode's frames .part file, which only one writer can create."""
+    targets = [files.frames, files.trajectory, *files.videos.values()]
+    for path in targets:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    claim = _part(files.frames)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(claim, flags, 0o666)
+    except FileExistsError:
+        if not overwrite:
+            raise FileExistsError(
+                f"episode {uid} is being written, or its writer stopped without "
+                f"removing {claim}; overwrite=True replaces it"
+            ) from None
+        claim.unlink(missing_ok=True)
+        fd = os.open(claim, flags, 0o666)
+    stream = os.fdopen(fd, "wb")
+    existing = [p for p in targets if p.exists()]
+    if existing and not overwrite:
+        stream.close()
+        claim.unlink()
+        raise FileExistsError(f"episode {uid} is already written: {existing[0]}")
+    # Holding the claim, any other .part file of the episode is a leftover.
+    for path in targets[1:]:
+        _part(path).unlink(missing_ok=True)
+    return stream
+
+
 class EpisodeWriter:
-    """Writes one episode: call add_frame and add_step in order, then close."""
+    """Writes one episode: call add_frame and add_step in order, then close.
+
+    The writer claims the episode by creating its frames .part file, so a second writer
+    of the same episode is refused until this one closes or aborts.
+    """
 
     def __init__(
         self,
@@ -292,24 +308,10 @@ class EpisodeWriter:
         self.files = episode_files(
             root, info["object_type"], info["episode_uid"], spec.video_cameras
         )
-        targets = [
-            self.files.frames,
-            self.files.trajectory,
-            *self.files.videos.values(),
-        ]
-        existing = [p for p in targets if p.exists() or _part(p).exists()]
-        if existing and not overwrite:
-            raise FileExistsError(
-                f"episode {info['episode_uid']} is already written: {existing[0]}"
-            )
-        for path in targets:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            _part(path).unlink(missing_ok=True)
-
         self._columns = fmt.frame_columns(spec.channels, spec.cameras)
-        self._schema = frame_schema(spec)
+        self._schema = fmt.frame_schema(spec.channels, spec.cameras, spec.image_size)
         self._options = _writer_options(self._schema, spec)
-        self._trajectory_schema = trajectory_schema()
+        self._trajectory_schema = fmt.trajectory_schema()
         self._layers = [
             name.rsplit(".", 1)[0]
             for name in self._columns
@@ -324,14 +326,12 @@ class EpisodeWriter:
         }
         computed |= {f"{layer}.sim_step" for layer in self._layers}
         computed |= {f"rgb.{c}.video_frame" for c in spec.cameras}
-        self._required = set(self._columns) - computed - {"source_frame_index"}
+        self._required = set(self._columns) - computed
         if "force" in spec.channels:
             self._required |= set(CONTACT_INPUTS)
         if "rgb" in spec.channels:
             self._required |= {f"rgb.{c}.image" for c in spec.cameras}
-        self._optional = {"source_frame_index"} | {
-            f"{layer}.sim_step" for layer in self._layers
-        }
+        self._optional = {f"{layer}.sim_step" for layer in self._layers}
 
         self._buffer: dict[str, list[Any]] = {name: [] for name in self._columns}
         self._contacts: dict[str, list[np.ndarray]] = {
@@ -341,13 +341,12 @@ class EpisodeWriter:
         self._frame_steps: list[int] = []
         self._writer: pq.ParquetWriter | None = None
         self._ffmpeg = ffmpeg
+        self._ffmpeg_version = ffmpeg_version
         self._encoders: dict[str, VideoEncoder] = {}
-        self._video = (
-            spec.video.record(ffmpeg_version or "unknown")
-            if self.files.videos
-            else None
-        )
         self._done = False
+        self._claim = _claim(self.files, info["episode_uid"], overwrite)
+        # The claim's file id once closed, which only Windows does before publishing.
+        self._claim_id: tuple[int, int] | None = None
 
     def __enter__(self) -> Self:
         return self
@@ -364,6 +363,28 @@ class EpisodeWriter:
     def n_frames(self) -> int:
         return len(self._frame_steps)
 
+    def _owns_claim(self, path: Path | None = None) -> bool:
+        """Whether path, the frames .part file by default, is this writer's claim.
+
+        The open claim is compared with the file at path, not with an id taken when it
+        was created: FAT32 and exFAT give an empty file a placeholder id that changes
+        once the file holds data. On POSIX the claim stays open until this is no longer
+        asked, so that its file id cannot be given to another file.
+        """
+        try:
+            found = os.stat(path or _part(self.files.frames))
+        except FileNotFoundError:
+            return False
+        if self._claim.closed:
+            return (found.st_dev, found.st_ino) == self._claim_id
+        return os.path.samestat(os.fstat(self._claim.fileno()), found)
+
+    def _check_claim(self, path: Path | None = None) -> None:
+        if not self._owns_claim(path):
+            raise RuntimeError(
+                f"another writer took episode {self.info['episode_uid']} over"
+            )
+
     def _expected_shape(self, name: str, shape: object) -> tuple[int, ...] | None:
         if shape == ():
             return None
@@ -371,10 +392,15 @@ class EpisodeWriter:
             return self.spec.image_size[fmt.column_camera(name)]
         if isinstance(shape, tuple) and shape[0] == "tets":
             return (self.n_tets,) if shape[1] == 1 else (self.n_tets, 3, 3)
-        field_name = name.rsplit(".", 1)[1]
-        return MATRIX_SHAPES.get(field_name, shape)
+        return shape
 
     def add_frame(self, frame: Mapping[str, Any]) -> None:
+        """One published frame. Frames are consecutive on the fps grid: each one's
+        sim_step is the previous one's plus recorded_fps / fps.
+
+        camera.<camera>.world_to_camera must be rigid to within 1e-6, which a rotation
+        computed in float32 can miss: compute it in float64.
+        """
         if self._done:
             raise RuntimeError("the episode is closed")
         keys = set(frame)
@@ -385,33 +411,24 @@ class EpisodeWriter:
                 f"frame {self.n_frames}: missing {missing}, unknown {unknown}"
             )
         step = _value("sim_step", frame["sim_step"], "int64", None)
-        previous = self._frame_steps[-1] if self._frame_steps else 0
-        if step <= previous:
-            raise ValueError(
-                f"frame {self.n_frames}: sim_step {step} does not increase"
-            )
-        if step % self.spec.stride:
-            raise ValueError(
-                f"frame {self.n_frames}: sim_step {step} is not on the {self.spec.fps} fps grid"
-            )
+        steps = {"sim_step": step}
         for layer in self._layers:
-            given = frame.get(f"{layer}.sim_step", step)
-            if _value(f"{layer}.sim_step", given, "int64", None) != step:
-                raise ValueError(
-                    f"frame {self.n_frames}: {layer} was captured at another step"
-                )
+            name = f"{layer}.sim_step"
+            steps[name] = _value(name, frame.get(name, step), "int64", None)
+        problem = fmt.frame_steps_error(
+            steps,
+            self._frame_steps[-1] if self._frame_steps else None,
+            self.spec.fps,
+            self.spec.recorded_fps,
+        )
+        if problem:
+            raise ValueError(f"frame {self.n_frames}: {problem}")
 
         row: dict[str, Any] = {
             "episode_uid": self.info["episode_uid"],
             "frame_index": self.n_frames,
             "sim_step": step,
             "sim_time_s": step / self.spec.recorded_fps,
-            "source_frame_index": _value(
-                "source_frame_index",
-                frame.get("source_frame_index", self.n_frames),
-                "int32",
-                None,
-            ),
         }
         for layer in self._layers:
             row[f"{layer}.sim_step"] = step
@@ -441,16 +458,7 @@ class EpisodeWriter:
             row[name] = _value(
                 name, frame[name], dtype, self._expected_shape(name, shape)
             )
-        for camera in self.spec.cameras:
-            name = f"segmentation.{camera}.mask"
-            if (
-                name in row
-                and row[name].size
-                and row[name].max() >= len(fmt.SEGMENTATION_CLASSES)
-            ):
-                raise ValueError(
-                    f"{name} holds a value outside the segmentation classes"
-                )
+        self._check_values(row, contacts)
         images = {}
         for camera in self.files.videos:
             image = np.asarray(frame[f"rgb.{camera}.image"])
@@ -461,19 +469,19 @@ class EpisodeWriter:
                 )
             images[camera] = image
 
-        if images and not self._encoders:
+        if images:
             if self._ffmpeg is None:
                 raise RuntimeError("writing RGB needs an ffmpeg executable")
-            self._encoders = {
-                camera: VideoEncoder(
-                    _part(path),
-                    self.spec.image_size[camera],
-                    self.spec.fps,
-                    self.spec.video,
-                    self._ffmpeg,
-                )
-                for camera, path in self.files.videos.items()
-            }
+            # One at a time, so that abort stops every encoder that has started.
+            for camera, path in self.files.videos.items():
+                if camera not in self._encoders:
+                    self._encoders[camera] = VideoEncoder(
+                        _part(path),
+                        self.spec.image_size[camera],
+                        self.spec.fps,
+                        self.spec.video,
+                        self._ffmpeg,
+                    )
         for camera, image in images.items():
             self._encoders[camera].write(image)
         for name, value in row.items():
@@ -484,39 +492,62 @@ class EpisodeWriter:
         if len(self._frame_steps) % self.spec.frames_per_row_group == 0:
             self._flush()
 
+    def _check_values(self, row: dict[str, Any], contacts: dict[str, Any]) -> None:
+        problems = [
+            (name, fmt.finite_error(name, value))
+            for name, value in [*row.items(), *contacts.items()]
+        ]
+        for camera in self.spec.cameras:
+            for name, error in (
+                (f"segmentation.{camera}.mask", fmt.mask_error),
+                (f"camera.{camera}.intrinsics", fmt.intrinsics_error),
+                (f"camera.{camera}.world_to_camera", fmt.world_to_camera_error),
+            ):
+                if name in row:
+                    problems.append((name, error(row[name])))
+        if "stress" in self.spec.channels:
+            problem = fmt.stress_error(row["stress.von_mises"], row["stress.valid"])
+            problems.append(("stress.von_mises", problem))
+        for name, problem in problems:
+            if problem:
+                raise ValueError(f"frame {self.n_frames}: {name} {problem}")
+
     def add_step(self, step: Mapping[str, Any]) -> None:
-        """One row of the trajectory: every recorded step, in order."""
+        """One row of the trajectory: every recorded step from step 1, in order.
+
+        object.centroid, object.bbox_min and object.bbox_max are NaN, or None, exactly
+        where finite is false; there the reached robot state and the force magnitudes may
+        be NaN too. robot.grip_contact_width_m may be NaN; every other float value is
+        finite.
+        """
         if self._done:
             raise RuntimeError("the episode is closed")
+        where = f"step {len(self._steps)}"
         names = set(fmt.TRAJECTORY_COLUMNS) - {"episode_uid", "sim_time_s"}
         keys = set(step)
         if keys != names:
             raise ValueError(
-                f"step {len(self._steps)}: missing {sorted(names - keys)}, "
+                f"{where}: missing {sorted(names - keys)}, "
                 f"unknown {sorted(keys - names)}"
             )
         sim_step = _value("sim_step", step["sim_step"], "int64", None)
-        if self._steps and sim_step != self._steps[-1]["sim_step"] + 1:
-            raise ValueError(
-                f"trajectory steps must be consecutive; {sim_step} follows "
-                f"{self._steps[-1]['sim_step']}"
-            )
-        if sim_step < 1:
-            raise ValueError("the first recorded step is 1")
-        finite = bool(_value("finite", step["finite"], "bool", None))
         row = {
             "episode_uid": self.info["episode_uid"],
             "sim_step": sim_step,
             "sim_time_s": sim_step / self.spec.recorded_fps,
-            "finite": finite,
+            "finite": bool(_value("finite", step["finite"], "bool", None)),
         }
         for name, (dtype, shape) in fmt.TRAJECTORY_COLUMNS.items():
             if name in row:
                 continue
-            value = step[name]
-            if value is None and name in fmt.NOT_FINITE_COLUMNS and not finite:
-                value = np.full(shape, np.nan)
-            row[name] = _value(name, value, dtype, self._expected_shape(name, shape))
+            row[name] = _value(
+                name, step[name], dtype, self._expected_shape(name, shape)
+            )
+        problem = fmt.trajectory_row_error(
+            row, self._steps[-1]["sim_step"] if self._steps else None
+        )
+        if problem:
+            raise ValueError(f"{where}: {problem}")
         self._steps.append(row)
 
     def _flush(self) -> None:
@@ -534,9 +565,7 @@ class EpisodeWriter:
                 )
         table = pa.Table.from_arrays(arrays, schema=self._schema)
         if self._writer is None:
-            self._writer = pq.ParquetWriter(
-                _part(self.files.frames), self._schema, **self._options
-            )
+            self._writer = pq.ParquetWriter(self._claim, self._schema, **self._options)
         self._writer.write_table(table, row_group_size=n)
         for values in self._buffer.values():
             values.clear()
@@ -564,6 +593,7 @@ class EpisodeWriter:
 
     def _metadata(self) -> dict[str, bytes]:
         info = dict(self.info)
+        video = self.spec.video.record() if self.files.videos else None
         info.update(
             {
                 "format": fmt.FORMAT,
@@ -585,7 +615,10 @@ class EpisodeWriter:
                 "segmentation_classes": list(fmt.SEGMENTATION_CLASSES)
                 if "segmentation" in self.spec.channels
                 else None,
-                "video": self._video,
+                "video": video,
+                "ffmpeg_version": None
+                if video is None
+                else self._ffmpeg_version or "unknown",
             }
         )
         return {fmt.METADATA_KEY: _dumps(info, "the episode metadata")}
@@ -596,8 +629,7 @@ class EpisodeWriter:
         try:
             if not self._frame_steps:
                 raise ValueError("an episode needs at least one frame")
-            recorded = {row["sim_step"] for row in self._steps}
-            unrecorded = [s for s in self._frame_steps if s not in recorded]
+            unrecorded = [s for s in self._frame_steps if s > len(self._steps)]
             if unrecorded:
                 raise ValueError(
                     f"the trajectory lacks frame steps, first {unrecorded[0]}"
@@ -608,6 +640,14 @@ class EpisodeWriter:
             self._writer.add_key_value_metadata(metadata)
             self._writer.close()
             self._writer = None
+            self._claim.flush()
+            # Checked once the claim holds data, which gives it its own id on FAT32.
+            self._check_claim()
+            if os.name == "nt":
+                # Windows renames no open file, and does not soon reuse a file id.
+                stat = os.fstat(self._claim.fileno())
+                self._claim_id = (stat.st_dev, stat.st_ino)
+                self._claim.close()
             _check_encodings(_part(self.files.frames), self._options)
             trajectory = pa.Table.from_pylist(
                 self._steps, schema=self._trajectory_schema
@@ -618,18 +658,23 @@ class EpisodeWriter:
             ) as writer:
                 writer.write_table(trajectory)
                 writer.add_key_value_metadata(metadata)
-            for encoder in self._encoders.values():
+            for camera, encoder in self._encoders.items():
                 encoder.close()
+                if encoder.n_frames != self.n_frames:
+                    raise RuntimeError(
+                        f"the {camera} video holds {encoder.n_frames} frames, "
+                        f"the episode {self.n_frames}"
+                    )
+            self._check_claim()
         except BaseException:
             self.abort()
             raise
-        for path in (
-            self.files.frames,
-            self.files.trajectory,
-            *self.files.videos.values(),
-        ):
-            os.replace(_part(path), path)
+        # If a rename fails, the episode stays claimed and its .part files tell why.
         self._done = True
+        try:
+            self._publish()
+        finally:
+            self._claim.close()
         return EpisodeFiles(
             self.files.frames,
             self.files.trajectory,
@@ -638,8 +683,33 @@ class EpisodeWriter:
             len(self._steps),
         )
 
+    def _publish(self) -> None:
+        """Rename the files into place, the frames file last and only while it is this
+        writer's claim: until it is renamed, the episode stays claimed."""
+        claim = _part(self.files.frames)
+        # No other writer uses this name, so the file found there cannot change.
+        mine = claim.with_name(f"{claim.name}.{os.urandom(4).hex()}")
+        try:
+            for path in (self.files.trajectory, *self.files.videos.values()):
+                os.replace(_part(path), path)
+            os.replace(claim, mine)
+        except FileNotFoundError:
+            # A writer that takes the episode over removes its other .part files.
+            self._check_claim()
+            raise
+        try:
+            self._check_claim(mine)
+        except RuntimeError:
+            os.replace(mine, claim)
+            raise
+        os.replace(mine, self.files.frames)
+
     def abort(self) -> None:
-        """Stop without writing; nothing of the episode is left on disk."""
+        """Stop without writing; nothing of the episode is left on disk.
+
+        A writer whose episode another writer took over (overwrite=True) leaves the
+        files alone.
+        """
         self._done = True
         if self._writer is not None:
             with contextlib.suppress(OSError, pa.ArrowException):
@@ -647,10 +717,15 @@ class EpisodeWriter:
             self._writer = None
         for encoder in self._encoders.values():
             encoder.abort()
+        owned = self._owns_claim()
+        with contextlib.suppress(OSError):
+            self._claim.close()
+        if not owned:
+            return
         for path in (
-            self.files.frames,
             self.files.trajectory,
             *self.files.videos.values(),
+            self.files.frames,
         ):
             _part(path).unlink(missing_ok=True)
 
@@ -659,7 +734,8 @@ class GraspDataRecorder:
     """Records grasp episodes in the public dataset format.
 
     Several recorders, in several processes, can write episodes of one dataset into
-    one root; finalize writes ``metadata.yaml`` and ``SHA256SUMS`` once all are written.
+    one root; finalize writes ``metadata.yaml``, ``SHA256SUMS`` and ``.gitattributes``
+    once all are written.
     """
 
     def __init__(
@@ -667,8 +743,12 @@ class GraspDataRecorder:
     ) -> None:
         self.root = Path(root)
         self.spec = spec
-        self._ffmpeg = find_ffmpeg(ffmpeg) if "rgb" in spec.channels else None
-        self._ffmpeg_version = ffmpeg_version(self._ffmpeg) if self._ffmpeg else None
+        self._ffmpeg = None
+        self._ffmpeg_version = None
+        if "rgb" in spec.channels:
+            self._ffmpeg = find_ffmpeg(ffmpeg)
+            check_encoder(self._ffmpeg, spec.video.encoder)
+            self._ffmpeg_version = ffmpeg_version(self._ffmpeg)
 
     def files(self, object_type: str, episode_uid: str) -> EpisodeFiles:
         return episode_files(
@@ -684,14 +764,22 @@ class GraspDataRecorder:
         n_tets: int,
         label: str,
         facts: Mapping[str, Any],
+        source_n_frames: int | None,
         task: Mapping[str, Any] | None = None,
         header: Mapping[str, Any] | None = None,
         generation_provenance: Mapping[str, Any] | None = None,
         export_provenance: Mapping[str, Any] | None = None,
-        source_n_frames: int | None = None,
         source_cut_at_row: int = -1,
         overwrite: bool = False,
     ) -> EpisodeWriter:
+        """Start writing an episode.
+
+        facts holds each of the kinds material, placement, lighting and camera as a
+        mapping with at least one value that is not null. source_n_frames is the
+        generator's frame count, which n_steps equals when the trajectory holds every
+        step it recorded; it is required, and None only when the count is unknown. task
+        is free-form until the PG-T1 scorer defines its keys.
+        """
         for key, value in (("episode_uid", episode_uid), ("object_type", object_type)):
             if not isinstance(value, str):
                 raise TypeError(f"{key} must be a string")
@@ -709,6 +797,9 @@ class GraspDataRecorder:
             raise ValueError("n_tets must be at least 1")
         if not isinstance(facts, Mapping):
             raise TypeError("facts must be a mapping")
+        problem = fmt.facts_error(facts)
+        if problem:
+            raise ValueError(problem)
         info = {
             "episode_uid": episode_uid,
             "object_type": object_type,
@@ -720,10 +811,13 @@ class GraspDataRecorder:
             "header": None if header is None else dict(header),
             "generation_provenance": generation_provenance,
             "export_provenance": export_provenance,
-            "source_n_frames": source_n_frames,
+            "source_n_frames": None
+            if source_n_frames is None
+            else operator.index(source_n_frames),
             "source_cut_at_row": int(source_cut_at_row),
         }
-        _dumps(info, "the episode metadata")
+        # A copy, so that the caller can reuse or change its mappings.
+        info = json.loads(_dumps(info, "the episode metadata"))
         return EpisodeWriter(
             self.root,
             self.spec,
