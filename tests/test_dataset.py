@@ -786,7 +786,8 @@ def test_a_dataset_spec_is_checked(change, message):
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"encoder": ""}, "encoder must be a nonempty string"),
+        ({"encoder": "libaom-av1"}, "encoder must be libsvtav1"),
+        ({"encoder": "librav1e"}, "encoder must be libsvtav1"),
         ({"crf": 0}, "crf must be between 1 and 63"),
         ({"crf": 64}, "crf must be between 1 and 63"),
         ({"gop": 1}, "gop must be at least 2"),

@@ -12,24 +12,31 @@ import numpy as np
 
 from .check_dataset import video_error, video_tracks
 
+ENCODER = "libsvtav1"
+
 
 @dataclass(frozen=True)
 class VideoSpec:
     """How RGB is encoded. AV1 in MP4, 8-bit 4:2:0 (yuv420p), is fixed by the format.
 
-    crf, gop and preset are passed to ffmpeg as -crf, -g and -preset, within the ranges
-    that its libsvtav1 encoder applies: it takes crf 0 and gop 1 as unset, and SVT-AV1
-    4.2 runs presets 12 and 13 as 11.
+    The encoder is ffmpeg's libsvtav1, and crf, gop and preset are passed to it as -crf,
+    -g and -preset within the ranges it applies: it takes crf 0 and gop 1 as unset, and
+    SVT-AV1 4.2 runs presets 12 and 13 as 11. Other AV1 encoders read these options on
+    other scales or ignore them, and the video record would then state settings that
+    were not used.
     """
 
-    encoder: str = "libsvtav1"
+    encoder: str = ENCODER
     crf: int = 30
     gop: int = 2
     preset: int = 8
 
     def __post_init__(self) -> None:
-        if not isinstance(self.encoder, str) or not self.encoder:
-            raise ValueError("encoder must be a nonempty string")
+        if self.encoder != ENCODER:
+            raise ValueError(
+                f"encoder must be {ENCODER}, whose crf, gop and preset the video "
+                f"record states; got {self.encoder!r}"
+            )
         if not 1 <= self.crf <= 63:
             raise ValueError("crf must be between 1 and 63")
         if self.gop < 2:

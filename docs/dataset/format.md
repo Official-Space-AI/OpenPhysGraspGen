@@ -210,11 +210,12 @@ its simulation time. RGB is the only lossy channel; every other channel is store
 | Encoder settings | stated in `metadata.yaml` (`video`) |
 
 All of these are read from the file's index, without decoding. The encoder settings are `codec`
-(`av1`), `pix_fmt` (`yuv420p`), `encoder` (`libsvtav1` by default), `crf` (1 to 63, 30 by
-default), `gop` (at least 2, 2 by default) and `preset` (0 to 11, 8 by default). The writer passes
-each of them to ffmpeg, and the ranges are those in which ffmpeg's SVT-AV1 encoder uses the value
-given rather than a default of its own, so `metadata.yaml` states the settings the videos were
-encoded with.
+(`av1`), `pix_fmt` (`yuv420p`), `encoder` (`libsvtav1`, ffmpeg's SVT-AV1 encoder, the only one
+the writer runs), `crf` (1 to 63, 30 by default), `gop` (at least 2, 2 by default) and `preset`
+(0 to 11, 8 by default). The writer passes each of them to ffmpeg, and the ranges are those in
+which SVT-AV1 uses the value given rather than a default of its own, so `metadata.yaml` states
+the settings the videos were encoded with. Other AV1 encoders read these options on other scales
+or ignore them.
 
 ## metadata.yaml
 
@@ -288,8 +289,7 @@ passes only with the criteria file and the script whose sha256 `metadata.yaml` l
 
 `pip install "physgraspgen[dataset]"` adds PyArrow and PyYAML, which writing and reading both
 need. Writing RGB also needs an `ffmpeg` executable on the `PATH` whose `ffmpeg -encoders` lists
-the configured AV1 encoder (`libsvtav1`, SVT-AV1, by default); the recorder checks this when it is
-created. Reading RGB with `read_video` needs an ffmpeg with an AV1 decoder, such as libdav1d;
+`libsvtav1` (SVT-AV1); the recorder checks this when it is created. Reading RGB with `read_video` needs an ffmpeg with an AV1 decoder, such as libdav1d;
 reading every other channel needs no ffmpeg.
 
 ```python
