@@ -455,6 +455,35 @@ def test_the_writer_keeps_copies_of_what_it_is_given(tmp_path):
         )
 
 
+def test_the_value_rules_accept_what_the_reader_returns(tmp_path):
+    # The dataset's check applies the writer's rules, in check_dataset.py, to read data.
+    spec = make_spec()
+    recorder = GraspDataRecorder(tmp_path, spec)
+    write_episode(recorder)
+    files = recorder.files("apple", "ep-0")
+    data = read_frames(files.frames)
+    for name, values in data.items():
+        assert fmt.finite_error(name, values) is None, name
+    previous = None
+    for i, step in enumerate(data["sim_step"]):
+        steps = {k: v[i] for k, v in data.items() if k.endswith("sim_step")}
+        assert fmt.frame_steps_error(steps, previous, 30, 60) is None
+        previous = step
+        for camera in spec.cameras:
+            assert fmt.mask_error(data[f"segmentation.{camera}.mask"][i]) is None
+            assert fmt.intrinsics_error(data[f"camera.{camera}.intrinsics"][i]) is None
+            matrix = data[f"camera.{camera}.world_to_camera"][i]
+            assert fmt.world_to_camera_error(matrix) is None
+        valid = data["stress.valid"][i]
+        assert fmt.stress_error(data["stress.von_mises"][i], valid) is None
+    trajectory = read_trajectory(files.trajectory)
+    previous = None
+    for i in range(len(trajectory["sim_step"])):
+        row = {name: values[i] for name, values in trajectory.items()}
+        assert fmt.trajectory_row_error(row, previous) is None
+        previous = row["sim_step"]
+
+
 # --- what the writer refuses -------------------------------------------------------
 
 FRAME_REFUSALS = [
@@ -561,7 +590,7 @@ FRAME_REFUSALS = [
             "camera.wrist.world_to_camera": world_to_camera(6, "wrist")
             @ np.diag([-1.0, 1.0, 1.0, 1.0])
         },
-        r"determinant is not \+1",
+        r"determinant is -1, not \+1",
     ),
 ]
 
@@ -603,10 +632,10 @@ STEP_REFUSALS = [
         "object.centroid must be finite where finite is true",
     ),
     ({"object.bbox_max": None}, "object.bbox_max must be finite where finite is true"),
-    ({"finite": False}, "object.centroid must be NaN, or None, where finite is false"),
+    ({"finite": False}, "object.centroid must be NaN where finite is false"),
     (
         {"finite": False, "object.centroid": None, "object.bbox_min": [np.nan] * 3},
-        "object.bbox_max must be NaN, or None, where finite is false",
+        "object.bbox_max must be NaN where finite is false",
     ),
     ({"robot.arm_q": np.full(6, np.nan)}, "robot.arm_q must be finite"),
     ({"robot.gripper_width_m": np.inf}, "robot.gripper_width_m must be finite"),

@@ -180,13 +180,15 @@ TRAJECTORY_COLUMNS = {
     "force.ground_force_mag": ("float64", ()),
 }
 
-# Value rules. Every float value of a column of these groups, contacts included, is
-# finite, except that a MAY_BE_NAN column may also be NaN and a trajectory's
-# NOT_FINITE_COLUMNS are NaN exactly where its finite column is false.
-# stress.von_mises is NaN exactly where stress.valid is false and finite elsewhere.
-# Depth, masks and stress.volume_ratio have no value rule.
+# Value rules, which the functions below apply. Every float value of a column of
+# FINITE_GROUPS, contact forces and points included, is finite, except where the names
+# below allow NaN. A mask value indexes SEGMENTATION_CLASSES, stress.von_mises is NaN
+# exactly where stress.valid is false, and the camera matrices are a pinhole K and a
+# rigid transform. Depth and stress.volume_ratio have no value rule.
 FINITE_GROUPS = ("robot", "object", "camera", "force", "deformation_gradient")
+# Finite or NaN: the jaw opening at first contact is NaN until the pads carry force.
 MAY_BE_NAN = ("robot.grip_contact_width_m",)
+# In the trajectory, NaN exactly where finite is false.
 NOT_FINITE_COLUMNS = ("object.centroid", "object.bbox_min", "object.bbox_max")
 # How far a world-to-camera rotation may be from orthonormal with determinant +1.
 RIGID_TOLERANCE = 1e-6
@@ -333,9 +335,85 @@ def trajectory_schema() -> pa.Schema:
 # --- values ---------------------------------------------------------------------------
 
 
-def must_be_finite(name: str) -> bool:
-    """Whether every float value of a column must be finite (see FINITE_GROUPS)."""
-    return name.split(".", 1)[0] in FINITE_GROUPS and name not in MAY_BE_NAN
+def finite_error(name: str, value: object) -> str | None:
+    """Why a column's value breaks the rule that its floats are finite, or None."""
+    array = np.asarray(value)
+    if array.dtype.kind != "f" or name.split(".", 1)[0] not in FINITE_GROUPS:
+        return None
+    if name in MAY_BE_NAN:
+        return "must be finite or NaN" if np.isinf(array).any() else None
+    return None if np.isfinite(array).all() else "must be finite"
+
+
+def mask_error(mask: object) -> str | None:
+    """Why a segmentation mask holds a value that is no class's index, or None."""
+    mask = np.asarray(mask)
+    if mask.size and mask.max() >= len(SEGMENTATION_CLASSES):
+        return "holds a value outside the segmentation classes"
+    return None
+
+
+def stress_error(von_mises: object, valid: object) -> str | None:
+    """Why stress.von_mises is not NaN exactly where stress.valid is false, or None."""
+    von_mises = np.asarray(von_mises, dtype=np.float64)
+    valid = np.asarray(valid, dtype=bool)
+    if np.isnan(von_mises[~valid]).all() and np.isfinite(von_mises[valid]).all():
+        return None
+    return "must be NaN exactly where stress.valid is false, and finite elsewhere"
+
+
+def frame_steps_error(
+    steps: Mapping[str, int], previous: int | None, fps: int, recorded_fps: int
+) -> str | None:
+    """Why a frame's steps break the step rules, or None.
+
+    steps maps sim_step and each <layer>.sim_step column of the frame to its value, and
+    previous is the previous frame's sim_step, None for the first frame. Frames are
+    consecutive on the fps grid, and every layer is captured at the frame's step.
+    """
+    step = steps["sim_step"]
+    stride = recorded_fps // fps
+    if previous is None:
+        if step < stride or step % stride:
+            return (
+                f"sim_step {step} is not on the {fps} fps grid, a positive multiple "
+                f"of {stride}"
+            )
+    elif step != previous + stride:
+        return (
+            f"sim_step {step} does not follow {previous} on the {fps} fps grid, "
+            f"which goes on at {previous + stride}"
+        )
+    for name, value in steps.items():
+        if value != step:
+            return f"{name.rsplit('.', 1)[0]} was captured at another step"
+    return None
+
+
+def trajectory_row_error(row: Mapping[str, object], previous: int | None) -> str | None:
+    """Why a trajectory row breaks the format's rules, or None.
+
+    row maps every column to its value, and previous is the previous row's sim_step,
+    None for the first row. The trajectory holds every recorded step from step 1.
+    """
+    step = row["sim_step"]
+    expected = 1 if previous is None else previous + 1
+    if step != expected:
+        return (
+            f"sim_step {step} is not {expected}; the trajectory holds every recorded "
+            "step from step 1"
+        )
+    finite = bool(row["finite"])
+    for name, value in row.items():
+        if name not in NOT_FINITE_COLUMNS:
+            problem = finite_error(name, value)
+            if problem:
+                return f"{name} {problem}"
+        elif finite and not np.isfinite(value).all():
+            return f"{name} must be finite where finite is true"
+        elif not finite and not np.isnan(value).all():
+            return f"{name} must be NaN where finite is false"
+    return None
 
 
 def intrinsics_error(intrinsics: object) -> str | None:
@@ -360,10 +438,18 @@ def world_to_camera_error(world_to_camera: object) -> str | None:
     if not np.array_equal(t[3], (0.0, 0.0, 0.0, 1.0)):
         return "is not a rigid transform: its last row must be 0 0 0 1"
     r = t[:3, :3]
-    if np.abs(r @ r.T - np.eye(3)).max() > RIGID_TOLERANCE:
-        return "is not a rigid transform: its rotation is not orthonormal"
-    if abs(np.linalg.det(r) - 1.0) > RIGID_TOLERANCE:
-        return "is not a rigid transform: its rotation's determinant is not +1"
+    deviation = np.abs(r @ r.T - np.eye(3)).max()
+    if deviation > RIGID_TOLERANCE:
+        return (
+            "is not a rigid transform: its rotation is not orthonormal, |R R^T - I| "
+            f"reaches {deviation:.2g} (at most {RIGID_TOLERANCE:g})"
+        )
+    det = np.linalg.det(r)
+    if abs(det - 1.0) > RIGID_TOLERANCE:
+        return (
+            f"is not a rigid transform: its rotation's determinant is {det:.8g}, "
+            f"not +1 (within {RIGID_TOLERANCE:g})"
+        )
     return None
 
 

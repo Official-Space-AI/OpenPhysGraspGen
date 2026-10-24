@@ -229,18 +229,6 @@ def _value(name: str, value: Any, dtype: str, expected: tuple[int, ...] | None) 
     return _cast(name, array, np.dtype(dtype)).reshape(-1)
 
 
-def _check_finite(name: str, value: Any) -> None:
-    """Refuse non-finite values where the format's value rules allow none."""
-    array = np.asarray(value)
-    if array.dtype.kind != "f":
-        return
-    if fmt.must_be_finite(name):
-        if not np.isfinite(array).all():
-            raise ValueError(f"{name} must be finite")
-    elif name in fmt.MAY_BE_NAN and np.isinf(array).any():
-        raise ValueError(f"{name} must be finite or NaN")
-
-
 def _arrow(
     values: list[Any], dtype: str, shape: object, type_: pa.DataType
 ) -> pa.Array:
@@ -398,25 +386,18 @@ class EpisodeWriter:
                 f"frame {self.n_frames}: missing {missing}, unknown {unknown}"
             )
         step = _value("sim_step", frame["sim_step"], "int64", None)
-        stride = self.spec.stride
-        if not self._frame_steps:
-            if step < stride or step % stride:
-                raise ValueError(
-                    f"frame 0: sim_step {step} is not on the {self.spec.fps} fps grid, "
-                    f"a positive multiple of {stride}"
-                )
-        elif step != self._frame_steps[-1] + stride:
-            raise ValueError(
-                f"frame {self.n_frames}: sim_step {step} does not follow "
-                f"{self._frame_steps[-1]} on the {self.spec.fps} fps grid, "
-                f"which goes on at {self._frame_steps[-1] + stride}"
-            )
+        steps = {"sim_step": step}
         for layer in self._layers:
-            given = frame.get(f"{layer}.sim_step", step)
-            if _value(f"{layer}.sim_step", given, "int64", None) != step:
-                raise ValueError(
-                    f"frame {self.n_frames}: {layer} was captured at another step"
-                )
+            name = f"{layer}.sim_step"
+            steps[name] = _value(name, frame.get(name, step), "int64", None)
+        problem = fmt.frame_steps_error(
+            steps,
+            self._frame_steps[-1] if self._frame_steps else None,
+            self.spec.fps,
+            self.spec.recorded_fps,
+        )
+        if problem:
+            raise ValueError(f"frame {self.n_frames}: {problem}")
 
         row: dict[str, Any] = {
             "episode_uid": self.info["episode_uid"],
@@ -487,39 +468,24 @@ class EpisodeWriter:
             self._flush()
 
     def _check_values(self, row: dict[str, Any], contacts: dict[str, Any]) -> None:
-        where = f"frame {self.n_frames}"
-        for name, value in [*row.items(), *contacts.items()]:
-            try:
-                _check_finite(name, value)
-            except ValueError as exc:
-                raise ValueError(f"{where}: {exc}") from None
+        problems = [
+            (name, fmt.finite_error(name, value))
+            for name, value in [*row.items(), *contacts.items()]
+        ]
         for camera in self.spec.cameras:
-            name = f"segmentation.{camera}.mask"
-            if (
-                name in row
-                and row[name].size
-                and row[name].max() >= len(fmt.SEGMENTATION_CLASSES)
-            ):
-                raise ValueError(
-                    f"{name} holds a value outside the segmentation classes"
-                )
             for name, error in (
+                (f"segmentation.{camera}.mask", fmt.mask_error),
                 (f"camera.{camera}.intrinsics", fmt.intrinsics_error),
                 (f"camera.{camera}.world_to_camera", fmt.world_to_camera_error),
             ):
-                problem = error(row[name])
-                if problem:
-                    raise ValueError(f"{where}: {name} {problem}")
+                if name in row:
+                    problems.append((name, error(row[name])))
         if "stress" in self.spec.channels:
-            von_mises, valid = row["stress.von_mises"], row["stress.valid"]
-            if not (
-                np.isnan(von_mises[~valid]).all()
-                and np.isfinite(von_mises[valid]).all()
-            ):
-                raise ValueError(
-                    f"{where}: stress.von_mises must be NaN exactly where stress.valid "
-                    "is false and finite where it is true"
-                )
+            problem = fmt.stress_error(row["stress.von_mises"], row["stress.valid"])
+            problems.append(("stress.von_mises", problem))
+        for name, problem in problems:
+            if problem:
+                raise ValueError(f"frame {self.n_frames}: {name} {problem}")
 
     def add_step(self, step: Mapping[str, Any]) -> None:
         """One row of the trajectory: every recorded step from step 1, in order.
@@ -538,18 +504,11 @@ class EpisodeWriter:
                 f"unknown {sorted(keys - names)}"
             )
         sim_step = _value("sim_step", step["sim_step"], "int64", None)
-        expected = self._steps[-1]["sim_step"] + 1 if self._steps else 1
-        if sim_step != expected:
-            raise ValueError(
-                f"{where}: sim_step {sim_step} is not {expected}; the trajectory holds "
-                "every recorded step from step 1"
-            )
-        finite = bool(_value("finite", step["finite"], "bool", None))
         row = {
             "episode_uid": self.info["episode_uid"],
             "sim_step": sim_step,
             "sim_time_s": sim_step / self.spec.recorded_fps,
-            "finite": finite,
+            "finite": bool(_value("finite", step["finite"], "bool", None)),
         }
         for name, (dtype, shape) in fmt.TRAJECTORY_COLUMNS.items():
             if name in row:
@@ -558,18 +517,11 @@ class EpisodeWriter:
             if value is None and name in fmt.NOT_FINITE_COLUMNS:
                 value = np.full(shape, np.nan)
             row[name] = _value(name, value, dtype, self._expected_shape(name, shape))
-        for name, value in row.items():
-            if name not in fmt.NOT_FINITE_COLUMNS:
-                try:
-                    _check_finite(name, value)
-                except ValueError as exc:
-                    raise ValueError(f"{where}: {exc}") from None
-            elif finite and not np.isfinite(value).all():
-                raise ValueError(f"{where}: {name} must be finite where finite is true")
-            elif not finite and not np.isnan(value).all():
-                raise ValueError(
-                    f"{where}: {name} must be NaN, or None, where finite is false"
-                )
+        problem = fmt.trajectory_row_error(
+            row, self._steps[-1]["sim_step"] if self._steps else None
+        )
+        if problem:
+            raise ValueError(f"{where}: {problem}")
         self._steps.append(row)
 
     def _flush(self) -> None:
