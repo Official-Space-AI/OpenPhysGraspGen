@@ -29,8 +29,6 @@ CONTACT_INPUTS = {
     "force.contact_is_ground": "is_ground",
     "force.contact_is_robot": "is_robot",
 }
-# Columns given as matrices and stored flat.
-MATRIX_SHAPES = {"intrinsics": (3, 3), "world_to_camera": (4, 4)}
 
 
 @dataclass(frozen=True)
@@ -224,26 +222,35 @@ def _dumps(value: Any, what: str) -> str:
 
 
 def _cast(name: str, array: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    """A copy of array in dtype; refused when a value does not fit."""
     if dtype.kind == "f":
         if array.dtype.kind not in "fiu":
             raise ValueError(f"{name} must be numeric")
-        return array.astype(dtype, copy=False)
+        with np.errstate(over="ignore"):
+            result = np.array(array, dtype=dtype)
+        if (
+            array.dtype.kind == "f"
+            and array.dtype.itemsize > dtype.itemsize
+            and (np.isinf(result) & np.isfinite(array)).any()
+        ):
+            raise ValueError(f"{name} does not fit {dtype}")
+        return result
     if dtype.kind == "b":
-        if array.dtype.kind == "b":
-            return array
-        if array.dtype.kind in "iu" and np.isin(array, (0, 1)).all():
-            return array.astype(bool)
+        if array.dtype.kind == "b" or (
+            array.dtype.kind in "iu" and np.isin(array, (0, 1)).all()
+        ):
+            return np.array(array, dtype=bool)
         raise ValueError(f"{name} must be boolean")
     if array.dtype.kind not in "iu":
         raise ValueError(f"{name} must be integers")
     info = np.iinfo(dtype)
     if array.size and (array.min() < info.min or array.max() > info.max):
         raise ValueError(f"{name} does not fit {dtype}")
-    return array.astype(dtype, copy=False)
+    return np.array(array, dtype=dtype)
 
 
 def _value(name: str, value: Any, dtype: str, expected: tuple[int, ...] | None) -> Any:
-    """A column's value as stored: a Python scalar, a string or a flat array."""
+    """A column's value as stored: a Python scalar, a string or a flat array copy."""
     if dtype == "string":
         if not isinstance(value, str) or not value:
             raise ValueError(f"{name} must be a nonempty string")
@@ -256,6 +263,18 @@ def _value(name: str, value: Any, dtype: str, expected: tuple[int, ...] | None) 
     if array.shape != expected:
         raise ValueError(f"{name} must have shape {expected}, got {array.shape}")
     return _cast(name, array, np.dtype(dtype)).reshape(-1)
+
+
+def _check_finite(name: str, value: Any) -> None:
+    """Refuse non-finite values where the format's value rules allow none."""
+    array = np.asarray(value)
+    if array.dtype.kind != "f":
+        return
+    if fmt.must_be_finite(name):
+        if not np.isfinite(array).all():
+            raise ValueError(f"{name} must be finite")
+    elif name in fmt.MAY_BE_NAN and np.isinf(array).any():
+        raise ValueError(f"{name} must be finite or NaN")
 
 
 def _arrow(
@@ -324,14 +343,12 @@ class EpisodeWriter:
         }
         computed |= {f"{layer}.sim_step" for layer in self._layers}
         computed |= {f"rgb.{c}.video_frame" for c in spec.cameras}
-        self._required = set(self._columns) - computed - {"source_frame_index"}
+        self._required = set(self._columns) - computed
         if "force" in spec.channels:
             self._required |= set(CONTACT_INPUTS)
         if "rgb" in spec.channels:
             self._required |= {f"rgb.{c}.image" for c in spec.cameras}
-        self._optional = {"source_frame_index"} | {
-            f"{layer}.sim_step" for layer in self._layers
-        }
+        self._optional = {f"{layer}.sim_step" for layer in self._layers}
 
         self._buffer: dict[str, list[Any]] = {name: [] for name in self._columns}
         self._contacts: dict[str, list[np.ndarray]] = {
@@ -371,10 +388,11 @@ class EpisodeWriter:
             return self.spec.image_size[fmt.column_camera(name)]
         if isinstance(shape, tuple) and shape[0] == "tets":
             return (self.n_tets,) if shape[1] == 1 else (self.n_tets, 3, 3)
-        field_name = name.rsplit(".", 1)[1]
-        return MATRIX_SHAPES.get(field_name, shape)
+        return shape
 
     def add_frame(self, frame: Mapping[str, Any]) -> None:
+        """One published frame. Frames are consecutive on the fps grid: each one's
+        sim_step is the previous one's plus recorded_fps / fps."""
         if self._done:
             raise RuntimeError("the episode is closed")
         keys = set(frame)
@@ -385,14 +403,18 @@ class EpisodeWriter:
                 f"frame {self.n_frames}: missing {missing}, unknown {unknown}"
             )
         step = _value("sim_step", frame["sim_step"], "int64", None)
-        previous = self._frame_steps[-1] if self._frame_steps else 0
-        if step <= previous:
+        stride = self.spec.stride
+        if not self._frame_steps:
+            if step < stride or step % stride:
+                raise ValueError(
+                    f"frame 0: sim_step {step} is not on the {self.spec.fps} fps grid, "
+                    f"a positive multiple of {stride}"
+                )
+        elif step != self._frame_steps[-1] + stride:
             raise ValueError(
-                f"frame {self.n_frames}: sim_step {step} does not increase"
-            )
-        if step % self.spec.stride:
-            raise ValueError(
-                f"frame {self.n_frames}: sim_step {step} is not on the {self.spec.fps} fps grid"
+                f"frame {self.n_frames}: sim_step {step} does not follow "
+                f"{self._frame_steps[-1]} on the {self.spec.fps} fps grid, "
+                f"which goes on at {self._frame_steps[-1] + stride}"
             )
         for layer in self._layers:
             given = frame.get(f"{layer}.sim_step", step)
@@ -406,12 +428,6 @@ class EpisodeWriter:
             "frame_index": self.n_frames,
             "sim_step": step,
             "sim_time_s": step / self.spec.recorded_fps,
-            "source_frame_index": _value(
-                "source_frame_index",
-                frame.get("source_frame_index", self.n_frames),
-                "int32",
-                None,
-            ),
         }
         for layer in self._layers:
             row[f"{layer}.sim_step"] = step
@@ -441,16 +457,7 @@ class EpisodeWriter:
             row[name] = _value(
                 name, frame[name], dtype, self._expected_shape(name, shape)
             )
-        for camera in self.spec.cameras:
-            name = f"segmentation.{camera}.mask"
-            if (
-                name in row
-                and row[name].size
-                and row[name].max() >= len(fmt.SEGMENTATION_CLASSES)
-            ):
-                raise ValueError(
-                    f"{name} holds a value outside the segmentation classes"
-                )
+        self._check_values(row, contacts)
         images = {}
         for camera in self.files.videos:
             image = np.asarray(frame[f"rgb.{camera}.image"])
@@ -484,25 +491,64 @@ class EpisodeWriter:
         if len(self._frame_steps) % self.spec.frames_per_row_group == 0:
             self._flush()
 
+    def _check_values(self, row: dict[str, Any], contacts: dict[str, Any]) -> None:
+        where = f"frame {self.n_frames}"
+        for name, value in [*row.items(), *contacts.items()]:
+            try:
+                _check_finite(name, value)
+            except ValueError as exc:
+                raise ValueError(f"{where}: {exc}") from None
+        for camera in self.spec.cameras:
+            name = f"segmentation.{camera}.mask"
+            if (
+                name in row
+                and row[name].size
+                and row[name].max() >= len(fmt.SEGMENTATION_CLASSES)
+            ):
+                raise ValueError(
+                    f"{name} holds a value outside the segmentation classes"
+                )
+            for name, error in (
+                (f"camera.{camera}.intrinsics", fmt.intrinsics_error),
+                (f"camera.{camera}.world_to_camera", fmt.world_to_camera_error),
+            ):
+                problem = error(row[name])
+                if problem:
+                    raise ValueError(f"{where}: {name} {problem}")
+        if "stress" in self.spec.channels:
+            von_mises, valid = row["stress.von_mises"], row["stress.valid"]
+            if not (
+                np.isnan(von_mises[~valid]).all()
+                and np.isfinite(von_mises[valid]).all()
+            ):
+                raise ValueError(
+                    f"{where}: stress.von_mises must be NaN exactly where stress.valid "
+                    "is false and finite where it is true"
+                )
+
     def add_step(self, step: Mapping[str, Any]) -> None:
-        """One row of the trajectory: every recorded step, in order."""
+        """One row of the trajectory: every recorded step from step 1, in order.
+
+        object.centroid, object.bbox_min and object.bbox_max are NaN, or None, exactly
+        where finite is false.
+        """
         if self._done:
             raise RuntimeError("the episode is closed")
+        where = f"step {len(self._steps)}"
         names = set(fmt.TRAJECTORY_COLUMNS) - {"episode_uid", "sim_time_s"}
         keys = set(step)
         if keys != names:
             raise ValueError(
-                f"step {len(self._steps)}: missing {sorted(names - keys)}, "
+                f"{where}: missing {sorted(names - keys)}, "
                 f"unknown {sorted(keys - names)}"
             )
         sim_step = _value("sim_step", step["sim_step"], "int64", None)
-        if self._steps and sim_step != self._steps[-1]["sim_step"] + 1:
+        expected = self._steps[-1]["sim_step"] + 1 if self._steps else 1
+        if sim_step != expected:
             raise ValueError(
-                f"trajectory steps must be consecutive; {sim_step} follows "
-                f"{self._steps[-1]['sim_step']}"
+                f"{where}: sim_step {sim_step} is not {expected}; the trajectory holds "
+                "every recorded step from step 1"
             )
-        if sim_step < 1:
-            raise ValueError("the first recorded step is 1")
         finite = bool(_value("finite", step["finite"], "bool", None))
         row = {
             "episode_uid": self.info["episode_uid"],
@@ -514,9 +560,21 @@ class EpisodeWriter:
             if name in row:
                 continue
             value = step[name]
-            if value is None and name in fmt.NOT_FINITE_COLUMNS and not finite:
+            if value is None and name in fmt.NOT_FINITE_COLUMNS:
                 value = np.full(shape, np.nan)
             row[name] = _value(name, value, dtype, self._expected_shape(name, shape))
+        for name, value in row.items():
+            if name not in fmt.NOT_FINITE_COLUMNS:
+                try:
+                    _check_finite(name, value)
+                except ValueError as exc:
+                    raise ValueError(f"{where}: {exc}") from None
+            elif finite and not np.isfinite(value).all():
+                raise ValueError(f"{where}: {name} must be finite where finite is true")
+            elif not finite and not np.isnan(value).all():
+                raise ValueError(
+                    f"{where}: {name} must be NaN, or None, where finite is false"
+                )
         self._steps.append(row)
 
     def _flush(self) -> None:
@@ -596,8 +654,7 @@ class EpisodeWriter:
         try:
             if not self._frame_steps:
                 raise ValueError("an episode needs at least one frame")
-            recorded = {row["sim_step"] for row in self._steps}
-            unrecorded = [s for s in self._frame_steps if s not in recorded]
+            unrecorded = [s for s in self._frame_steps if s > len(self._steps)]
             if unrecorded:
                 raise ValueError(
                     f"the trajectory lacks frame steps, first {unrecorded[0]}"
@@ -692,6 +749,12 @@ class GraspDataRecorder:
         source_cut_at_row: int = -1,
         overwrite: bool = False,
     ) -> EpisodeWriter:
+        """Start writing an episode.
+
+        facts holds each of the kinds material, placement, lighting and camera as a
+        mapping with at least one value that is not null. task is free-form until the
+        PG-T1 scorer defines its keys.
+        """
         for key, value in (("episode_uid", episode_uid), ("object_type", object_type)):
             if not isinstance(value, str):
                 raise TypeError(f"{key} must be a string")
@@ -709,6 +772,9 @@ class GraspDataRecorder:
             raise ValueError("n_tets must be at least 1")
         if not isinstance(facts, Mapping):
             raise TypeError("facts must be a mapping")
+        problem = fmt.facts_error(facts)
+        if problem:
+            raise ValueError(problem)
         info = {
             "episode_uid": episode_uid,
             "object_type": object_type,
@@ -723,7 +789,8 @@ class GraspDataRecorder:
             "source_n_frames": source_n_frames,
             "source_cut_at_row": int(source_cut_at_row),
         }
-        _dumps(info, "the episode metadata")
+        # A copy, so that the caller can reuse or change its mappings.
+        info = json.loads(_dumps(info, "the episode metadata"))
         return EpisodeWriter(
             self.root,
             self.spec,

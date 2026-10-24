@@ -5,14 +5,16 @@
 Every dataset carries this file as ``tools/check_dataset.py``, so it imports nothing
 from ``physgraspgen`` and needs only Python 3.10 or newer, NumPy, PyArrow and PyYAML.
 ``physgraspgen.dataset`` imports the format from here, so the writer and the check
-cannot disagree about a file or a column. The format is documented in
+cannot disagree about a file, a column or a value rule. The format is documented in
 ``docs/dataset/format.md``.
 """
 
 from __future__ import annotations
 
+import math
 import re
 import struct
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,14 +39,16 @@ CHANNELS = ("rgb", "depth", "force", "stress", "deformation_gradient", "segmenta
 CAMERA_CHANNELS = ("rgb", "depth", "segmentation")
 SEGMENTATION_CLASSES = ("background", "object", "arm", "gripper", "support", "prop")
 LABELS = ("success", "fracture", "fail", "unknown")
+# The kinds of an episode's facts that the diversity tables read.
+FACT_KINDS = ("material", "placement", "lighting", "camera")
 FILE_KINDS = ("frames", "trajectory", "video")
 # Object types, episode ids and camera names become path components.
 NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
-# A column is (dtype, shape). The shape is () for one value, (n,) for a fixed-size
-# list, "image" for one value per pixel of the camera's image, ("tets", k) for k
-# values per tetrahedron and "contacts" for one struct per contact. Names with
-# "{camera}" are repeated for every camera.
+# A column is (dtype, shape). The shape is () for one value, a tuple of sizes for a
+# fixed-size list of that many values stored row-major, "image" for one value per
+# pixel of the camera's image, ("tets", k) for k values per tetrahedron and "contacts"
+# for one struct per contact. Names with "{camera}" are repeated for every camera.
 FRAME_COLUMNS = {
     "episode_uid": ("string", ()),
     "frame_index": ("int32", ()),
@@ -86,8 +90,8 @@ CHANNEL_COLUMNS = {
     },
 }
 CAMERA_COLUMNS = {
-    "camera.{camera}.intrinsics": ("float64", (9,)),
-    "camera.{camera}.world_to_camera": ("float64", (16,)),
+    "camera.{camera}.intrinsics": ("float64", (3, 3)),
+    "camera.{camera}.world_to_camera": ("float64", (4, 4)),
 }
 STATE_COLUMNS = {
     "robot.ee_pose_cmd": ("float64", (7,)),
@@ -141,8 +145,17 @@ TRAJECTORY_COLUMNS = {
     "force.gripper_force_mag": ("float64", ()),
     "force.ground_force_mag": ("float64", ()),
 }
-# Trajectory columns that are NaN where the object's state is not finite.
+
+# Value rules. Every float value of a column of these groups, contacts included, is
+# finite, except that a MAY_BE_NAN column may also be NaN and a trajectory's
+# NOT_FINITE_COLUMNS are NaN exactly where its finite column is false.
+# stress.von_mises is NaN exactly where stress.valid is false and finite elsewhere.
+# Depth, masks and stress.volume_ratio have no value rule.
+FINITE_GROUPS = ("robot", "object", "camera", "force", "deformation_gradient")
+MAY_BE_NAN = ("robot.grip_contact_width_m",)
 NOT_FINITE_COLUMNS = ("object.centroid", "object.bbox_min", "object.bbox_max")
+# How far a world-to-camera rotation may be from orthonormal with determinant +1.
+RIGID_TOLERANCE = 1e-6
 
 CONVENTIONS = {
     "units": "SI: metres, seconds, newtons, pascals, radians",
@@ -150,8 +163,16 @@ CONVENTIONS = {
     "quaternion": "x, y, z, w",
     "frames": (
         "a frame is one simulation step; sim_step counts steps at recorded_fps from "
-        "the episode start, the first recorded step being 1; a published frame's step "
-        "is a multiple of recorded_fps / fps"
+        "the episode start, the first recorded step being 1; an episode's frames are "
+        "consecutive multiples of recorded_fps / fps"
+    ),
+    "trajectory": (
+        "one row per recorded step from step 1; object.centroid, object.bbox_min and "
+        "object.bbox_max are NaN exactly where finite is false"
+    ),
+    "video": (
+        "video frame i is the episode's frame i; the video's own timestamps are "
+        "i / fps from 0, not sim_time_s"
     ),
     "camera": (
         "pinhole; pixel (u, v), u the column and v the row, sees world point X where "
@@ -162,7 +183,7 @@ CONVENTIONS = {
     "depth": "forward (z) depth in metres",
     "stress": (
         "von Mises stress per tetrahedron from the deformed mesh through the object's "
-        "material model; NaN where not valid"
+        "material model; NaN exactly where stress.valid is false"
     ),
     "deformation_gradient": (
         "per tetrahedron, row-major F[t, r, c], from the object's rest mesh turned by "
@@ -223,9 +244,67 @@ def arrow_type(
         return pa.list_(value, height * width)
     if isinstance(shape, tuple) and len(shape) == 2 and shape[0] == "tets":
         return pa.list_(value)
-    if isinstance(shape, tuple) and len(shape) == 1:
-        return pa.list_(value, shape[0])
+    if isinstance(shape, tuple) and all(isinstance(n, int) for n in shape):
+        return pa.list_(value, math.prod(shape))
     raise ValueError(f"unknown column shape {shape!r}")
+
+
+# --- values ---------------------------------------------------------------------------
+
+
+def must_be_finite(name: str) -> bool:
+    """Whether every float value of a column must be finite (see FINITE_GROUPS)."""
+    return name.split(".", 1)[0] in FINITE_GROUPS and name not in MAY_BE_NAN
+
+
+def intrinsics_error(intrinsics: object) -> str | None:
+    """Why a matrix is not a pinhole K [[fx, 0, cx], [0, fy, cy], [0, 0, 1]], or None."""
+    k = np.asarray(intrinsics, dtype=np.float64).reshape(3, 3)
+    if not np.isfinite(k).all():
+        return "is not finite"
+    if k[0, 1] != 0 or k[1, 0] != 0:
+        return "is not a pinhole K: K[0][1] (skew) and K[1][0] must be 0"
+    if not np.array_equal(k[2], (0.0, 0.0, 1.0)):
+        return "is not a pinhole K: its last row must be 0 0 1"
+    if not (k[0, 0] > 0 and k[1, 1] > 0):
+        return "is not a pinhole K: its focal lengths must be positive"
+    return None
+
+
+def world_to_camera_error(world_to_camera: object) -> str | None:
+    """Why a matrix is not a rigid 4 x 4 transform, or None."""
+    t = np.asarray(world_to_camera, dtype=np.float64).reshape(4, 4)
+    if not np.isfinite(t).all():
+        return "is not finite"
+    if not np.array_equal(t[3], (0.0, 0.0, 0.0, 1.0)):
+        return "is not a rigid transform: its last row must be 0 0 0 1"
+    r = t[:3, :3]
+    if np.abs(r @ r.T - np.eye(3)).max() > RIGID_TOLERANCE:
+        return "is not a rigid transform: its rotation is not orthonormal"
+    if abs(np.linalg.det(r) - 1.0) > RIGID_TOLERANCE:
+        return "is not a rigid transform: its rotation's determinant is not +1"
+    return None
+
+
+def _has_value(value: object) -> bool:
+    if isinstance(value, Mapping):
+        return any(_has_value(item) for item in value.values())
+    return value is not None
+
+
+def facts_error(facts: object) -> str | None:
+    """Why an episode's facts lack a kind the diversity tables read, or None.
+
+    Each of FACT_KINDS must be a mapping with at least one leaf that is not null.
+    """
+    if not isinstance(facts, Mapping):
+        return "facts must be a mapping"
+    for kind in FACT_KINDS:
+        if not isinstance(facts.get(kind), Mapping):
+            return f"facts has no {kind} mapping"
+        if not _has_value(facts[kind]):
+            return f"facts.{kind} holds no value but null"
+    return None
 
 
 # --- MP4 ------------------------------------------------------------------------------
