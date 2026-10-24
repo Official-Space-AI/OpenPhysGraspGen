@@ -1712,6 +1712,14 @@ def test_a_trajectory_the_writer_would_not_write_is_found(root, damage, message)
     assert steps["n_pass"] == steps["n_frames"] == N_FRAMES
 
 
+def test_a_trajectorys_rows_are_judged_whatever_else_its_footer_breaks(root):
+    set_footer(root, lambda f: {**f, "label": "bogus"})
+    rewrite(root, APPLE_TRAJECTORY, table=cell("sim_time_s", 1, 0.5))
+    assert errors(check(root), APPLE_TRAJECTORY) == [
+        "row 1: sim_time_s is 0.5, not sim_step / recorded_fps (0.03333333333333333)"
+    ]
+
+
 def test_a_trajectory_must_hold_every_frames_step(root):
     set_footer(root, lambda f: {**f, "n_steps": 4})
     rewrite(root, APPLE_TRAJECTORY, table=lambda t: t.slice(0, 4))
@@ -1797,6 +1805,43 @@ def test_a_video_filed_under_another_camera_is_found(root):
         "is not the video its episode was written with"
     ]
     assert not report["items"]["scale"]["pass"]
+
+
+@pytest.mark.parametrize(
+    ("data", "stated", "message"),
+    [
+        (video(2), True, "holds 2 frames, not 3"),
+        (
+            video(width=48, height=32),
+            True,
+            "is 32 x 48 pixels, not the camera's 16 x 24",
+        ),
+        (video(payload=b"other frames"), False, "is not the video its episode was"),
+    ],
+    ids=["short", "other-size", "other-bytes"],
+)
+def test_a_video_is_held_to_its_episode_whatever_else_its_footer_breaks(
+    root, data, stated, message
+):
+    if stated:
+        replace_video(root, APPLE_FRONT, data)
+    else:
+        (root / APPLE_FRONT).write_bytes(data)
+        restamp(root, APPLE_FRONT)
+    # A footer error that has nothing to do with the video.
+    set_footer(root, lambda f: {**f, "label": "bogus"})
+    report = check(root)
+    assert errors(report, APPLE)[0].startswith("metadata label is 'bogus'")
+    (found,) = errors(report, APPLE_FRONT)
+    assert found.startswith(message)
+    # So the episode's frames have no RGB of the front camera, and the episode no rgb.
+    failed = report["items"]["consistency"]["steps"]["failed_by_reason"]
+    reason = f"rgb.front has no video of the episode's frames: {APPLE_FRONT} {found}"
+    assert failed == {reason: 3}
+    assert not report["items"]["consistency"]["pass"]
+    spec = report["items"]["metadata"]["spec"]
+    assert spec["missing_channels"] == ["rgb"]
+    assert f"{APPLE}: channels" in mismatches(report)
 
 
 @needs_av1

@@ -1499,9 +1499,8 @@ class DataFile:
     footer: dict[str, Any] | None = None
     raw_footer: bytes | None = None
     # The cameras' (height, width) when the footer's channels, cameras and sizes are
-    # the format's, and whether the whole footer is.
+    # the format's.
     sizes: dict[str, tuple[int, int]] | None = None
-    footer_ok: bool = False
     schema: Any = None
     track: VideoTrack | None = None
     errors: list[str] = field(default_factory=list)
@@ -1891,11 +1890,11 @@ def read_frames_file(path: Path, rec: DataFile) -> _Frames | None:
             rec.n_rows = metadata.num_rows
             footer = _footer(metadata, rec)
             if footer is not None:
-                problems = footer_errors(
-                    footer, rec.id.object_type, rec.id.episode_uid, rec.n_rows
+                rec.errors.extend(
+                    footer_errors(
+                        footer, rec.id.object_type, rec.id.episode_uid, rec.n_rows
+                    )
                 )
-                rec.errors.extend(problems)
-                rec.footer_ok = not problems
             if rec.n_rows < 1:
                 rec.errors.append("holds no frame; an episode has at least one")
             if footer is None:
@@ -2172,7 +2171,11 @@ def read_trajectory_file(
 ) -> None:
     """Read a trajectory file in full and apply the format's rules: its footer is its
     frames file's, byte for byte; its columns; every row's values; every frame's step
-    among its steps, with the frame's robot and object values."""
+    among its steps, with the frame's robot and object values.
+
+    The rules on its rows apply when its footer, columns and step count are right and
+    the footer's episode_uid and recorded_fps, which they read, are valid, whatever
+    else the frames file's footer gets wrong: that is the frames file's finding."""
     try:
         with _parquet(path) as parquet:
             metadata = parquet.metadata
@@ -2193,11 +2196,10 @@ def read_trajectory_file(
                     rec.errors.append(
                         f"its {METADATA_KEY} metadata is not that of {frames.rel}{differ}"
                     )
-                valid = frames.footer_ok
             else:
-                problems = footer_errors(footer, rec.id.object_type, rec.id.episode_uid)
-                rec.errors.extend(problems)
-                valid = not problems
+                rec.errors.extend(
+                    footer_errors(footer, rec.id.object_type, rec.id.episode_uid)
+                )
             rec.schema = parquet.schema_arrow
             rec.errors.extend(
                 schema_errors(rec.schema, trajectory_schema(), _stored(metadata))
@@ -2205,7 +2207,11 @@ def read_trajectory_file(
             n_steps = footer.get("n_steps")
             if rows != n_steps:
                 rec.errors.append(f"holds {rows} steps, its metadata says {n_steps!r}")
-            if rec.errors or not valid:
+            if (
+                rec.errors
+                or footer.get("episode_uid") != rec.id.episode_uid
+                or not _is_int(footer.get("recorded_fps"), 1)
+            ):
                 return
             _trajectory_rows(parquet, rec, footer, frames, data)
     except Exception as exc:  # noqa: BLE001, what a damaged file raises is its finding
@@ -2331,7 +2337,11 @@ def _trajectory_rows(
 def read_video_file(path: Path, rec: DataFile, frames: DataFile | None) -> None:
     """Read a video's MP4 index, never a frame, and apply the format's rules: one AV1
     track, yuv420p, the camera's size, the episode's frame count at a constant fps,
-    every frame shown in order, and the sha256 its episode's footer states."""
+    every frame shown in order, and the sha256 its episode's footer states.
+
+    frames is the episode's frames file when it was read. Each rule that compares the
+    video with its episode applies whenever the value it needs was read and is valid,
+    whatever else the episode's footer gets wrong."""
     try:
         try:
             tracks = video_tracks(path)
@@ -2344,18 +2354,30 @@ def read_video_file(path: Path, rec: DataFile, frames: DataFile | None) -> None:
         rec.track = tracks[0]
         rec.n_rows = rec.track.n_frames
         camera = rec.id.camera
-        footer = frames.footer if frames is not None and frames.footer_ok else None
-        if footer is None or "rgb" not in footer["channels"]:
+        footer = (frames.footer if frames is not None else None) or {}
+        sizes = frames.sizes if frames is not None else None
+        if sizes is not None and (
+            "rgb" not in footer["channels"] or camera not in sizes
+        ):
+            # Not a video of its episode (link_episodes): its own rules alone.
             rec.errors.extend(video_errors(rec.track))
             return
-        if camera not in footer["cameras"]:
-            rec.errors.extend(video_errors(rec.track))
-            return
+        fps = footer.get("fps")
         rec.errors.extend(
-            video_errors(rec.track, frames.sizes[camera], footer["fps"], frames.n_rows)
+            video_errors(
+                rec.track,
+                None if sizes is None else sizes[camera],
+                fps if _is_int(fps, 1) else None,
+                None if frames is None else frames.n_rows,
+            )
         )
-        digest = rec.sha256 or sha256_file(path)[0]
-        if digest != footer["video_sha256"][camera]:
+        digests = footer.get("video_sha256")
+        stated = digests.get(camera) if isinstance(digests, Mapping) else None
+        if (
+            isinstance(stated, str)
+            and re.fullmatch("[0-9a-f]{64}", stated)
+            and (rec.sha256 or sha256_file(path)[0]) != stated
+        ):
             rec.errors.append("is not the video its episode was written with")
     except Exception as exc:  # noqa: BLE001, what a damaged file raises is its finding
         rec.errors.append(_failed(rec, exc))
