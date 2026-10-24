@@ -514,9 +514,9 @@ class EpisodeWriter:
     def add_step(self, step: Mapping[str, Any]) -> None:
         """One row of the trajectory: every recorded step from step 1, in order.
 
-        Where finite is false, object.centroid, object.bbox_min and object.bbox_max are
-        NaN and the robot's values may be. The force magnitudes are both NaN on a step
-        without a force layer. None stands for NaN.
+        object.centroid, object.bbox_min and object.bbox_max are NaN, or None, exactly
+        where finite is false, and robot.grip_contact_width_m may be; every other float
+        value is finite.
         """
         if self._done:
             raise RuntimeError("the episode is closed")

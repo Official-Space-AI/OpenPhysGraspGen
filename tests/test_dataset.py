@@ -208,15 +208,9 @@ def make_step(step, finite=True):
     return row
 
 
-# The step a simulation blew up at, as the generator records it: no object state, no
-# force layer, and the robot's reached state partly lost.
-BLOWN_UP = {
-    **make_step(3, finite=False),
-    **dict.fromkeys(fmt.FORCE_LAYER_COLUMNS),
-    "robot.ee_pose": np.full(7, np.nan),
-    "robot.arm_q": np.array([0.5, np.nan, 0.2, 0.1, 0.0, 0.3]),
-    "robot.gripper_width_m": np.nan,
-}
+# What a step whose object state is not finite changes, as make_step writes it.
+NON_FINITE = {"finite": False, **dict.fromkeys(fmt.NOT_FINITE_COLUMNS)}
+FORCE_MAGNITUDES = ("force.gripper_force_mag", "force.ground_force_mag")
 
 
 def open_episode(recorder, uid="ep-0", object_type="apple", **kwargs):
@@ -662,15 +656,20 @@ STEP_REFUSALS = [
     ({"robot.gripper_width_m": None}, "robot.gripper_width_m must be finite"),
     ({"robot.gripper_width_m": np.inf}, "robot.gripper_width_m must be finite"),
     ({"robot.grip_contact_width_m": -np.inf}, "must be finite or NaN"),
+    ({"force.gripper_force_mag": np.nan}, "force.gripper_force_mag must be finite"),
+    ({"force.ground_force_mag": None}, "force.ground_force_mag must be finite"),
+    # Where finite is false, only the object's state is NaN.
     (
-        {**BLOWN_UP, "robot.arm_q": np.full(6, np.inf)},
-        "robot.arm_q must be finite or NaN",
+        {**NON_FINITE, **dict.fromkeys(FORCE_MAGNITUDES)},
+        "force.gripper_force_mag must be finite",
     ),
-    ({"force.gripper_force_mag": np.nan}, "must both be NaN, on a step without"),
-    ({"force.ground_force_mag": None}, "must both be NaN, on a step without"),
     (
-        {"force.gripper_force_mag": np.inf, "force.ground_force_mag": np.inf},
-        "force.gripper_force_mag must be finite or NaN",
+        {**NON_FINITE, "robot.ee_pose_cmd": np.full(7, np.nan)},
+        "robot.ee_pose_cmd must be finite",
+    ),
+    (
+        {**NON_FINITE, "robot.gripper_width_cmd_m": None},
+        "robot.gripper_width_cmd_m must be finite",
     ),
     ({"robot.waypoint": None}, "robot.waypoint must be integers"),
 ]
@@ -702,7 +701,7 @@ def test_the_trajectory_starts_at_step_1(tmp_path):
         episode.abort()
 
 
-def test_the_step_a_simulation_blew_up_at_is_written_with_nan(tmp_path):
+def test_a_non_finite_step_holds_nan_object_state(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     with open_episode(recorder, source_n_frames=3) as episode:
         frame = make_frame(2, recorder.spec)
@@ -710,20 +709,16 @@ def test_the_step_a_simulation_blew_up_at_is_written_with_nan(tmp_path):
         episode.add_frame(frame)
         episode.add_step(make_step(1))
         episode.add_step({**make_step(2), "robot.grip_contact_width_m": None})
-        episode.add_step(BLOWN_UP)
+        nan = {name: np.full(3, np.nan) for name in fmt.NOT_FINITE_COLUMNS}
+        episode.add_step({**make_step(3), "finite": False, **nan})
     files = recorder.files("apple", "ep-0")
     trajectory = read_trajectory(files.trajectory)
     assert trajectory["finite"].tolist() == [True, True, False]
-    for name in (
-        *fmt.NOT_FINITE_COLUMNS,
-        *fmt.FORCE_LAYER_COLUMNS,
-        "robot.ee_pose",
-        "robot.gripper_width_m",
-    ):
+    for name in fmt.NOT_FINITE_COLUMNS:
         assert np.isnan(trajectory[name][2]).all(), name
         assert np.isfinite(trajectory[name][:2]).all(), name
-    np.testing.assert_array_equal(trajectory["robot.arm_q"][2], BLOWN_UP["robot.arm_q"])
-    assert np.isfinite(trajectory["robot.arm_q_setpoint"]).all()
+    for name in ("robot.ee_pose", "robot.arm_q", *FORCE_MAGNITUDES):
+        np.testing.assert_array_equal(trajectory[name][2], make_step(3)[name], name)
     assert np.isnan(trajectory["robot.grip_contact_width_m"]).all()
     assert np.isnan(read_frames(files.frames)["robot.grip_contact_width_m"]).all()
     meta = episode_metadata(files.trajectory)
