@@ -371,6 +371,27 @@ def test_without_checksums_every_file_is_read_and_metadata_fails(root):
     assert "(sha256 not checked)" in fmt.format_table(report)
 
 
+@pytest.mark.parametrize(
+    ("item", "values"),
+    [
+        ("scale", {"min_frames": N_FRAMES + 1}),
+        ("metadata", {"license": "CC0-1.0"}),
+        ("consistency", {"min_contact_frames": N_FRAMES + 1}),
+        ("diversity", {"min_object_types": N_TYPES + 1}),
+    ],
+)
+def test_each_item_that_fails_fails_the_run(root, capsys, item, values):
+    # Published criteria that this one item does not meet.
+    republish(root, CRITERIA, criteria_text(**{**SMALL, **values}).encode())
+    code, out, _, payload = main(capsys, root, "--seed", SEED)
+    assert code == 1
+    assert [i for i in fmt.ITEMS if not payload[i]["pass"]] == [item]
+    assert payload["criteria"]["matches_published"] is True
+    assert payload["script"]["matches_published"] is True
+    assert payload["pass"] is False
+    assert out.splitlines()[-2] == "Overall: FAIL"
+
+
 @POSIX
 def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_path):
     assert (root / "tools/check_dataset.py").read_bytes() == SCRIPT.read_bytes()
@@ -492,6 +513,51 @@ def criteria_file(tmp_path, text):
     path = tmp_path / "criteria.yaml"
     path.write_text(text)
     return path
+
+
+# The acceptance values every dataset ships, with their types: a change is deliberate.
+PUBLISHED = {
+    "scale": {"min_frames": 1_000_000},
+    "metadata": {
+        "max_mismatches": 0,
+        "required_channels": [
+            "rgb",
+            "depth",
+            "force",
+            "stress",
+            "deformation_gradient",
+            "segmentation",
+        ],
+        "required_cameras": ["front", "wrist"],
+        "license": "CC-BY-4.0",
+    },
+    "consistency": {
+        "min_pass_fraction": 1.0,
+        "layers": ["rgb", "depth", "force", "stress"],
+        "sample_frames": 1000,
+        "min_contact_frames": 1000,
+        "projection_radius_px": 4.0,
+        "min_point_fraction": 1.0,
+        "projection_tolerance_provenance": (
+            "placeholder: one draw per camera rig measured pressed contacts up to 3.4 px "
+            "from the object; to be measured on format 2.0 data and agreed"
+        ),
+        "distance_reach_px": 16.0,
+    },
+    "diversity": {
+        "min_object_types": 10,
+        "required_fact_kinds": ["material", "placement", "lighting", "camera"],
+        "bins": 8,
+        "log_bins_min_ratio": 100.0,
+        "max_categories": 30,
+    },
+}
+
+
+def test_the_package_ships_the_published_acceptance_values():
+    criteria, _ = fmt.load_criteria(SCRIPT.with_name("check_criteria.yaml"))
+    # As JSON text, 1 is not 1.0.
+    assert json.dumps(criteria, sort_keys=True) == json.dumps(PUBLISHED, sort_keys=True)
 
 
 BAD_CRITERIA = [
@@ -1074,7 +1140,8 @@ def test_without_checksums_a_damaged_file_is_read_as_it_is(root):
     report = check(root, checksums=False)
     (error,) = [e for e in errors(report, APPLE) if "cannot be read" in e]
     assert error.startswith("cannot be read: OSError: ")
-    assert "checksum" in error.lower() or "corrupt" in error.lower() or error
+    # The page's checksum, not a decoder that happens to fail, finds the damage.
+    assert "CRC checksum verification failed" in error
 
 
 def test_a_file_changed_after_it_was_hashed_is_not_judged(root, monkeypatch):
@@ -2068,6 +2135,19 @@ def test_mismatches_come_in_one_order(root):
     ]
 
 
+@pytest.mark.parametrize(("n", "passes"), [(1, True), (2, False)])
+def test_metadata_allows_its_maximum_of_mismatches(root, tmp_path, n, passes):
+    metadata = read_meta(root)
+    metadata["counts"]["n_frames"] += 1
+    if n == 2:
+        metadata["counts"]["n_episodes"] += 1
+    write_meta(root, metadata)
+    path = criteria_file(tmp_path, criteria_text(**SMALL, max_mismatches=1))
+    criteria, _ = fmt.load_criteria(path)
+    result = fmt.run_checks(root, criteria, items=("metadata",))["items"]["metadata"]
+    assert (result["n_mismatches"], result["pass"]) == (n, passes)
+
+
 def test_sha256sums_is_compared_with_metadata_yaml(root):
     sums = (root / "SHA256SUMS").read_text().splitlines()
     first = sums[0].split("  ")[1]
@@ -2187,6 +2267,19 @@ def test_the_specification_needs_every_channel_camera_and_the_licence(root, tmp_
     )
 
 
+@POSIX
+def test_the_specification_needs_every_required_camera(tmp_path):
+    root = tmp_path / "dataset"
+    build_dataset(root, ffmpeg=fake_av1(tmp_path / "bin"), cameras=("front",))
+    metadata = check(root, items=("metadata",))["items"]["metadata"]
+    assert metadata["n_mismatches"] == 0
+    spec = metadata["spec"]
+    assert spec["cameras_in_every_episode"] == ["front"]
+    assert spec["missing_cameras"] == ["wrist"]
+    assert [k for k, ok in spec["checks"].items() if not ok] == ["cameras"]
+    assert not metadata["pass"]
+
+
 def test_a_dataset_without_masks_lacks_a_channel_of_the_specification(tmp_path):
     root = tmp_path / "dataset"
     channels = ("rgb", "depth", "force", "stress", "deformation_gradient")
@@ -2222,6 +2315,23 @@ def test_a_layer_recorded_at_another_step_fails_its_frame(root):
             "reasons": ["depth.wrist was recorded at another step"],
         }
     ]
+
+
+@pytest.mark.parametrize(("fraction", "passes"), [(0.9, True), (0.95, False)])
+def test_each_consistency_part_needs_its_fraction_of_frames(
+    root, tmp_path, fraction, passes
+):
+    # Frame 1 has a depth image of another step and frame 0 a mask of another step, so
+    # nine of ten frames pass each part; masks are not a published layer.
+    rewrite(root, APPLE, table=cell("depth.wrist.sim_step", 1, 2))
+    rewrite(root, APPLE, table=cell("segmentation.wrist.sim_step", 0, 4))
+    values = {**SMALL, "sample_frames": N_FRAMES, "min_pass_fraction": fraction}
+    criteria, _ = fmt.load_criteria(criteria_file(tmp_path, criteria_text(**values)))
+    result = fmt.run_checks(root, criteria, items=("consistency",), seed=SEED)
+    steps, proj = result["items"]["consistency"]["steps"], projection(result)
+    assert (steps["n_pass"], steps["n_frames"]) == (N_FRAMES - 1, N_FRAMES)
+    assert proj["statuses"] == {"mask_step": 1, "pass": N_FRAMES - 1}
+    assert (steps["pass"], proj["pass"]) == (passes, passes)
 
 
 def test_a_layer_without_its_own_steps_fails_every_frame(root):
@@ -2414,6 +2524,48 @@ def test_points_beside_the_object_fail_the_projection(scenes):
     assert report["items"]["consistency"]["steps"]["pass"]
 
 
+@pytest.mark.parametrize(
+    ("values", "status"),
+    [
+        # From the front camera the points lie 3.5 and 5.5 px from the object, from
+        # the wrist camera 2.8 and 4.6 px.
+        ({"projection_radius_px": 5.0}, "off_object"),
+        ({"projection_radius_px": 6.0}, "pass"),
+        ({"projection_radius_px": 6.0, "distance_reach_px": 2.0}, "pass"),
+        ({"min_point_fraction": 0.5}, "pass"),
+        ({"min_point_fraction": 0.6}, "off_object"),
+    ],
+)
+def test_the_projection_applies_the_tolerance_it_is_given(
+    scenes, tmp_path, values, status
+):
+    root = scenes("off", moved(0.5))
+    criteria, _ = fmt.load_criteria(
+        criteria_file(tmp_path, criteria_text(**{**SMALL, **values}))
+    )
+    report = fmt.run_checks(root, criteria, items=("consistency",), seed=SEED)
+    assert projection(report)["statuses"] == {status: 5}
+    # Distances are measured out to the radius at least.
+    reach = max(
+        values.get("distance_reach_px", 16.0), values.get("projection_radius_px", 4.0)
+    )
+    assert report["items"]["consistency"]["criterion"]["distance_reach_px"] == reach
+
+
+def test_a_point_at_the_radius_is_on_the_object(scenes, tmp_path):
+    root = scenes("off", moved(0.5))
+    farthest = projection(check(root))["per_camera"]["front"]["distance_px"]["max"]
+    for radius, status in (
+        (farthest, "pass"),
+        (float(np.nextafter(farthest, 0.0)), "off_object"),
+    ):
+        text = criteria_text(**SMALL, projection_radius_px=repr(radius))
+        criteria, _ = fmt.load_criteria(criteria_file(tmp_path, text))
+        assert criteria["consistency"]["projection_radius_px"] == radius
+        report = fmt.run_checks(root, criteria, items=("consistency",), seed=SEED)
+        assert projection(report)["statuses"] == {status: 5}
+
+
 def test_points_behind_the_cameras_are_not_in_view(scenes):
     def behind(step, spec, n=None):
         frame = scene_frame(step, spec)
@@ -2564,6 +2716,12 @@ def test_the_projection_needs_its_minimum_of_candidates(root, tmp_path):
     proj = projection(fmt.run_checks(root, criteria, items=("consistency",), seed=SEED))
     assert (proj["n_candidates"], proj["n_pass"]) == (N_FRAMES, 5)
     assert not proj["pass"]
+    # The minimum counts the candidates, not the sample drawn from them.
+    values = {**SMALL, "sample_frames": 5, "min_contact_frames": 8}
+    criteria, _ = fmt.load_criteria(criteria_file(tmp_path, criteria_text(**values)))
+    proj = projection(fmt.run_checks(root, criteria, items=("consistency",), seed=SEED))
+    assert (proj["n_candidates"], proj["n_sampled"]) == (N_FRAMES, 5)
+    assert proj["pass"]
 
 
 def test_a_depth_column_of_another_shape_leaves_out_the_residual(root):
@@ -2803,7 +2961,7 @@ def test_a_run_passes_only_with_the_published_criteria(root, tmp_path):
     )
     assert not report["published_tools"]["pass"]
     # A byte-identical copy elsewhere is the published file.
-    copy = criteria_file(tmp_path / "copy", "") if False else tmp_path / "copy.yaml"
+    copy = tmp_path / "copy.yaml"
     shutil.copy(root / CRITERIA, copy)
     criteria, digest = fmt.load_criteria(copy)
     report = fmt.run_checks(
