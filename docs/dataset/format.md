@@ -143,17 +143,23 @@ images.
 |---|---|---|
 | `episode_uid` | string | the episode |
 | `sim_step`, `sim_time_s` | int64, float64 | as in the frames file |
-| `finite` | bool | the object's state is finite at this step |
+| `finite` | bool | the simulation's state, the object's and the robot's, is finite at this step |
 | `robot.waypoint`, `robot.phase` | int32, string | as in the frames file |
 | `robot.ee_pose_cmd`, `robot.ee_pose`, `robot.arm_q_setpoint`, `robot.arm_q` | as in the frames file | |
 | `robot.gripper_width_cmd_m`, `robot.gripper_width_setpoint_m`, `robot.gripper_width_m`, `robot.grip_contact_width_m` | float64 | as in the frames file |
 | `object.centroid`, `object.bbox_min`, `object.bbox_max` | fixed list of 3 float64 | as in the frames file, NaN exactly where `finite` is false |
 | `object.n_robot_contacts` | int32 | as in the frames file |
-| `force.gripper_force_mag`, `force.ground_force_mag` | float64 | as in the frames file |
+| `force.gripper_force_mag`, `force.ground_force_mag` | float64 | as in the frames file, both NaN on a step without a force layer |
 
-`object.centroid`, `object.bbox_min` and `object.bbox_max` are NaN in every element exactly where
-`finite` is false (the writer takes them as NaN or as None there) and finite where it is true.
-`robot.grip_contact_width_m` is finite or NaN, and every other float value is finite.
+- `object.centroid`, `object.bbox_min` and `object.bbox_max` are NaN in every element exactly
+  where `finite` is false, and finite where it is true. Where `finite` is false, the robot's float
+  values may be NaN too.
+- `force.gripper_force_mag` and `force.ground_force_mag` are both NaN on a step without a force
+  layer, such as the step at which the simulation blew up, and both finite elsewhere.
+- `robot.grip_contact_width_m` is finite or NaN, and every other float value is finite.
+
+So the trajectory keeps the last step of a recording that blew up, and NaN marks the values the
+simulation did not give there.
 
 ## Episode metadata
 
@@ -178,7 +184,7 @@ Both Parquet files of an episode carry the same metadata as JSON under the foote
 | `facts` | per-episode values the diversity tables read, nested by kind. `material`, `placement`, `lighting` and `camera` are each a mapping holding at least one value that is not null; other kinds may be added |
 | `task` | what benchmark scoring reads besides the trajectory. Its keys are defined by the PG-T1 scorer (issue #20); until then it is free-form, or null |
 | `header`, `generation_provenance`, `export_provenance` | the generator's episode header and the records of the code and data that generated and exported it, or null |
-| `source_n_frames`, `source_cut_at_row` | the generator's frame count and the row the export stopped at because a frame missed a layer (-1 when it did not stop early) |
+| `source_n_frames`, `source_cut_at_row` | the generator's frame count, which `n_steps` equals when the trajectory holds every step the generator recorded, or null when not given; and the row the export stopped at because a frame missed a layer (-1 when it did not stop early) |
 
 Every episode of a dataset must state the same `format`, `format_version`, `dataset_name`,
 `dataset_version`, `license`, `fps`, `recorded_fps`, `channels`, `cameras`, `image_size`,
@@ -321,10 +327,11 @@ per-channel steps, which default to the frame's `sim_step`); `source_frame_index
 is given as `rgb.<camera>.image`, (H, W, 3) uint8, the contacts as `force.contact_force`,
 `force.contact_point_world`, `force.contact_particle`, `force.contact_is_ground` and
 `force.contact_is_robot`, one row per contact, and the camera matrices as 3 x 3 and 4 x 4 arrays.
-A step gives every column of the trajectory file except `episode_uid` and `sim_time_s`. The writer
-copies what it keeps, so a caller may refill one set of arrays for every frame and step. A frame
-or a step that does not follow the format, its value rules included, is refused before anything
-of it is written; so is a float64 value too large for a float32 column.
+A step gives every column of the trajectory file except `episode_uid` and `sim_time_s`. Where a
+value may be NaN, it may also be given as None. The writer copies what it keeps, so a caller may
+refill one set of arrays for every frame and step. A frame or a step that does not follow the
+format, its value rules included, is refused before anything of it is written; so is a float64
+value too large for a float32 column.
 
 An episode is written to `.part` files that are renamed only when every file of the episode is
 complete, the frames file last. The writer claims the episode by creating its frames `.part` file,

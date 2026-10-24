@@ -205,6 +205,17 @@ def make_step(step, finite=True):
     return row
 
 
+# The step a simulation blew up at, as the generator records it: no object state, no
+# force layer, and the robot's reached state partly lost.
+BLOWN_UP = {
+    **make_step(3, finite=False),
+    **dict.fromkeys(fmt.FORCE_LAYER_COLUMNS),
+    "robot.ee_pose": np.full(7, np.nan),
+    "robot.arm_q": np.array([0.5, np.nan, 0.2, 0.1, 0.0, 0.3]),
+    "robot.gripper_width_m": np.nan,
+}
+
+
 def open_episode(recorder, uid="ep-0", object_type="apple", **kwargs):
     kwargs = {
         "object_asset": f"{object_type}_01",
@@ -638,10 +649,20 @@ STEP_REFUSALS = [
         "object.bbox_max must be NaN where finite is false",
     ),
     ({"robot.arm_q": np.full(6, np.nan)}, "robot.arm_q must be finite"),
+    ({"robot.gripper_width_m": None}, "robot.gripper_width_m must be finite"),
     ({"robot.gripper_width_m": np.inf}, "robot.gripper_width_m must be finite"),
     ({"robot.grip_contact_width_m": -np.inf}, "must be finite or NaN"),
-    ({"force.gripper_force_mag": np.nan}, "force.gripper_force_mag must be finite"),
-    ({"force.gripper_force_mag": None}, "force.gripper_force_mag must be numeric"),
+    (
+        {**BLOWN_UP, "robot.arm_q": np.full(6, np.inf)},
+        "robot.arm_q must be finite or NaN",
+    ),
+    ({"force.gripper_force_mag": np.nan}, "must both be NaN, on a step without"),
+    ({"force.ground_force_mag": None}, "must both be NaN, on a step without"),
+    (
+        {"force.gripper_force_mag": np.inf, "force.ground_force_mag": np.inf},
+        "force.gripper_force_mag must be finite or NaN",
+    ),
+    ({"robot.waypoint": None}, "robot.waypoint must be integers"),
 ]
 
 
@@ -671,18 +692,32 @@ def test_the_trajectory_starts_at_step_1(tmp_path):
         episode.abort()
 
 
-def test_a_non_finite_step_holds_nan_object_state(tmp_path):
+def test_the_step_a_simulation_blew_up_at_is_written_with_nan(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
-    with open_episode(recorder) as episode:
-        episode.add_frame(make_frame(2, recorder.spec))
+    with open_episode(recorder, source_n_frames=3) as episode:
+        frame = make_frame(2, recorder.spec)
+        frame["robot.grip_contact_width_m"] = None
+        episode.add_frame(frame)
         episode.add_step(make_step(1))
-        episode.add_step(make_step(2))
-        nan = {name: np.full(3, np.nan) for name in fmt.NOT_FINITE_COLUMNS}
-        episode.add_step({**make_step(3, finite=False), **nan})
-    trajectory = read_trajectory(recorder.files("apple", "ep-0").trajectory)
+        episode.add_step({**make_step(2), "robot.grip_contact_width_m": None})
+        episode.add_step(BLOWN_UP)
+    files = recorder.files("apple", "ep-0")
+    trajectory = read_trajectory(files.trajectory)
     assert trajectory["finite"].tolist() == [True, True, False]
-    assert np.isnan(trajectory["object.bbox_min"][2]).all()
+    for name in (
+        *fmt.NOT_FINITE_COLUMNS,
+        *fmt.FORCE_LAYER_COLUMNS,
+        "robot.ee_pose",
+        "robot.gripper_width_m",
+    ):
+        assert np.isnan(trajectory[name][2]).all(), name
+        assert np.isfinite(trajectory[name][:2]).all(), name
+    np.testing.assert_array_equal(trajectory["robot.arm_q"][2], BLOWN_UP["robot.arm_q"])
+    assert np.isfinite(trajectory["robot.arm_q_setpoint"]).all()
     assert np.isnan(trajectory["robot.grip_contact_width_m"]).all()
+    assert np.isnan(read_frames(files.frames)["robot.grip_contact_width_m"]).all()
+    meta = episode_metadata(files.trajectory)
+    assert meta["n_steps"] == meta["source_n_frames"] == 3
 
 
 @pytest.mark.parametrize(
@@ -707,6 +742,7 @@ def test_a_non_finite_step_holds_nan_object_state(tmp_path):
             "facts.placement holds no value but null",
         ),
         ({"task": {"tol": float("nan")}}, ValueError, "JSON without NaN"),
+        ({"source_n_frames": 2.5}, TypeError, "cannot be interpreted as an integer"),
     ],
 )
 def test_episode_arguments_are_checked(tmp_path, change, error, message):

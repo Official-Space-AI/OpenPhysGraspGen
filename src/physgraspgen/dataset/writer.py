@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import operator
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -214,11 +215,21 @@ def _cast(name: str, array: np.ndarray, dtype: np.dtype) -> np.ndarray:
 
 
 def _value(name: str, value: Any, dtype: str, expected: tuple[int, ...] | None) -> Any:
-    """A column's value as stored: a Python scalar, a string or a flat array copy."""
+    """A column's value as stored: a Python scalar, a string or a flat array copy.
+
+    None stands for NaN in a float column that a value rule covers, and the rule decides
+    whether NaN is allowed there.
+    """
     if dtype == "string":
         if not isinstance(value, str) or not value:
             raise ValueError(f"{name} must be a nonempty string")
         return value
+    if (
+        value is None
+        and dtype.startswith("float")
+        and name.split(".", 1)[0] in fmt.FINITE_GROUPS
+    ):
+        value = np.full(expected or (), np.nan)
     array = np.asarray(value)
     if expected is None:
         if array.shape != ():
@@ -490,8 +501,9 @@ class EpisodeWriter:
     def add_step(self, step: Mapping[str, Any]) -> None:
         """One row of the trajectory: every recorded step from step 1, in order.
 
-        object.centroid, object.bbox_min and object.bbox_max are NaN, or None, exactly
-        where finite is false.
+        Where finite is false, object.centroid, object.bbox_min and object.bbox_max are
+        NaN and the robot's values may be. The force magnitudes are both NaN on a step
+        without a force layer. None stands for NaN.
         """
         if self._done:
             raise RuntimeError("the episode is closed")
@@ -513,10 +525,9 @@ class EpisodeWriter:
         for name, (dtype, shape) in fmt.TRAJECTORY_COLUMNS.items():
             if name in row:
                 continue
-            value = step[name]
-            if value is None and name in fmt.NOT_FINITE_COLUMNS:
-                value = np.full(shape, np.nan)
-            row[name] = _value(name, value, dtype, self._expected_shape(name, shape))
+            row[name] = _value(
+                name, step[name], dtype, self._expected_shape(name, shape)
+            )
         problem = fmt.trajectory_row_error(
             row, self._steps[-1]["sim_step"] if self._steps else None
         )
@@ -757,7 +768,9 @@ class GraspDataRecorder:
             "header": None if header is None else dict(header),
             "generation_provenance": generation_provenance,
             "export_provenance": export_provenance,
-            "source_n_frames": source_n_frames,
+            "source_n_frames": None
+            if source_n_frames is None
+            else operator.index(source_n_frames),
             "source_cut_at_row": int(source_cut_at_row),
         }
         # A copy, so that the caller can reuse or change its mappings.

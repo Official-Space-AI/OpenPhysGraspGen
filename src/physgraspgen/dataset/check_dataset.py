@@ -188,8 +188,12 @@ TRAJECTORY_COLUMNS = {
 FINITE_GROUPS = ("robot", "object", "camera", "force", "deformation_gradient")
 # Finite or NaN: the jaw opening at first contact is NaN until the pads carry force.
 MAY_BE_NAN = ("robot.grip_contact_width_m",)
-# In the trajectory, NaN exactly where finite is false.
+# In the trajectory, NaN exactly where finite is false, where the robot's values may be
+# NaN too.
 NOT_FINITE_COLUMNS = ("object.centroid", "object.bbox_min", "object.bbox_max")
+# In the trajectory, both NaN on a step without a force layer, such as the step at which
+# the simulation blew up, and both finite elsewhere.
+FORCE_LAYER_COLUMNS = ("force.gripper_force_mag", "force.ground_force_mag")
 # How far a world-to-camera rotation may be from orthonormal with determinant +1.
 RIGID_TOLERANCE = 1e-6
 
@@ -203,8 +207,9 @@ CONVENTIONS = {
         "consecutive multiples of recorded_fps / fps"
     ),
     "trajectory": (
-        "one row per recorded step from step 1; object.centroid, object.bbox_min and "
-        "object.bbox_max are NaN exactly where finite is false"
+        "one row per recorded step from step 1 to the last; where finite is false the "
+        "object's state is NaN and the robot's may be; the force magnitudes are NaN on "
+        "a step without a force layer"
     ),
     "video": (
         "video frame i is the episode's frame i; the video's own timestamps are "
@@ -335,12 +340,15 @@ def trajectory_schema() -> pa.Schema:
 # --- values ---------------------------------------------------------------------------
 
 
-def finite_error(name: str, value: object) -> str | None:
-    """Why a column's value breaks the rule that its floats are finite, or None."""
+def finite_error(name: str, value: object, nan: bool = False) -> str | None:
+    """Why a column's value breaks the rule that its floats are finite, or None.
+
+    nan allows NaN as well, as a MAY_BE_NAN column always does.
+    """
     array = np.asarray(value)
     if array.dtype.kind != "f" or name.split(".", 1)[0] not in FINITE_GROUPS:
         return None
-    if name in MAY_BE_NAN:
+    if nan or name in MAY_BE_NAN:
         return "must be finite or NaN" if np.isinf(array).any() else None
     return None if np.isfinite(array).all() else "must be finite"
 
@@ -403,10 +411,18 @@ def trajectory_row_error(row: Mapping[str, object], previous: int | None) -> str
             f"sim_step {step} is not {expected}; the trajectory holds every recorded "
             "step from step 1"
         )
+    if len({bool(np.isnan(row[name])) for name in FORCE_LAYER_COLUMNS}) > 1:
+        return (
+            f"{' and '.join(FORCE_LAYER_COLUMNS)} must both be NaN, on a step without "
+            "a force layer, or both finite"
+        )
     finite = bool(row["finite"])
     for name, value in row.items():
         if name not in NOT_FINITE_COLUMNS:
-            problem = finite_error(name, value)
+            nan = name in FORCE_LAYER_COLUMNS or (
+                not finite and name.startswith("robot.")
+            )
+            problem = finite_error(name, value, nan)
             if problem:
                 return f"{name} {problem}"
         elif finite and not np.isfinite(value).all():
