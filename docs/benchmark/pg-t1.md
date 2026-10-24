@@ -173,11 +173,11 @@ row whose centroid has risen at least 0.12 m above it, with no tolerance.
 - `lifted` is true when there is a crossing, false when there is none, and not reached when no row
   has a centroid.
 - `held` is decided on rows c to c + 240: true when every row of that window that has a centroid
-  stays at least 0.12 m up, false when one does not. When the recording ends before the window
-  does, `held` is not reached, or false when the generator stopped the episode on a drop. The
-  truncation is decided first, so a window the recording cuts short is not reached even when a row
-  inside it already dipped. A row without a centroid inside the window is skipped. There is no
-  `held` without a crossing.
+  stays at least 0.12 m up, false when one does not; a row without a centroid is skipped. When the
+  last row that has a centroid comes before row c + 240, the window is cut short and `held` is not
+  reached, or false when the generator stopped the episode on a drop. The truncation is decided
+  first, so a window cut short is not reached even when a row inside it already dipped. There is
+  no `held` without a crossing.
 
 The window spans 241 rows, 4.0 s from the crossing to its last row.
 
@@ -186,17 +186,19 @@ The window spans 241 rows, 4.0 s from the crossing to its last row.
 C is the agreement criterion as it is implemented and as the generator records it. The rest heights
 are the centroid height and the lowest-point height (`object.bbox_min` z) of the first row that has
 both. A row is up when its centroid has risen at least 0.05 m and its lowest point at least 0.005 m,
-each within 1e-9 m (so a rise of exactly 5 cm stored through float32 still counts). k is the first
-row that is up, and the window is rows k to k + 120 - 1.
+each within 1e-9 m. The tie only absorbs float64 rounding: the heights must be the generator's
+float64 values, since a float32 round trip can move a rise by a few 1e-9 m either way. k is the
+first row that is up, and the window is rows k to k + 120 - 1; a row without both heights is
+skipped.
 
 - No row is up: false when the generator stopped the episode as never lifted or as dropped, false
   when the lift phase recorded every row it was scheduled for (`never_crossed`), and not reached
   otherwise (`incomplete`).
-- A row of the window that has both heights is not up: false, `dipped_in_window` when its centroid
-  is under 5 cm, else `still_supported` when only its lowest point is under 5 mm. A recorded dip
-  decides the window even when the recording ends before it.
-- Every row of a fully recorded window is up: true.
-- The recording ends inside the window: false when the generator stopped the episode on a drop
+- A row of the window is not up: false, `dipped_in_window` when the centroid of some row of the
+  window is under 5 cm, else `still_supported` (only lowest points under 5 mm). A recorded dip
+  decides the window even when the window is cut short.
+- Otherwise, when the last row that has both heights is at or after row k + 120 - 1: true.
+- Otherwise the window is cut short: false when the generator stopped the episode on a drop
   (`stopped_dropped_in_window`), not reached otherwise (`window_truncated`).
 
 `lifted` under C is true when some row is up, and otherwise the verdict above (false or not
@@ -214,10 +216,11 @@ and not lifted under C.
 ### The attempt the episode ended in
 
 Under `lift_hold_retry` an episode may fly two attempts. A phase is complete when the attempt the
-episode ended in (the last attempt whose first waypoint was reached) recorded, for that phase, at
-least as many rows with a centroid as the schedule plans for its waypoints in that attempt; a
-waypoint the generator skipped still counts in the plan. The rules of B and C read every row of the
-recording, so under a retry the first crossing decides, wherever it falls.
+episode ended in recorded, for that phase, at least as many rows with a centroid as the schedule
+plans for its waypoints in that attempt; a waypoint the generator skipped still counts in the plan.
+The attempt the episode ended in is the last one whose first waypoint index is at most the highest
+waypoint index recorded; that first waypoint may itself have been skipped. The rules of B and C read
+every row of the recording, so under a retry the first crossing decides, wherever it falls.
 
 ### Placed
 
