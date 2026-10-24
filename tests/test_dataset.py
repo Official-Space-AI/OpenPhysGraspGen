@@ -8,7 +8,6 @@ import re
 import shutil
 import struct
 import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -17,9 +16,41 @@ import pytest
 pytest.importorskip("pyarrow")
 pytest.importorskip("yaml")
 
+import mp4_index
 import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
+from dataset_helpers import (
+    DROP,
+    FACTS,
+    FORCE_MAGNITUDES,
+    NO_RGB,
+    NON_FINITE,
+    POSIX,
+    TASK,
+    H,
+    T,
+    W,
+    _box,
+    _fake_ffmpeg,
+    colour,
+    edit,
+    fake_av1,
+    fake_encoder,
+    files_under,
+    fill,
+    intrinsics,
+    make_frame,
+    make_spec,
+    make_step,
+    minimal_mp4,
+    needs_av1,
+    open_episode,
+    rewrite,
+    sample_entry,
+    world_to_camera,
+    write_episode,
+)
 
 from openphysgraspgen.dataset import (
     DatasetError,
@@ -37,234 +68,6 @@ from openphysgraspgen.dataset import (
 from openphysgraspgen.dataset import check_dataset as fmt
 from openphysgraspgen.dataset import video as video_module
 from openphysgraspgen.dataset import writer as writer_module
-
-# A non-square image, so that a swapped width and height cannot pass.
-H, W = 64, 96
-T = 5
-NO_RGB = tuple(c for c in fmt.CHANNELS if c != "rgb")
-FACTS = {
-    "material": {"E_pa": 1.0e5, "nu": 0.45},
-    "placement": {"yaw_deg": 30.0, "offset_m": [0.01, -0.02]},
-    "lighting": {"elevation_deg": 45.0},
-    "camera": {"front_distance_m": 0.6},
-}
-TASK = {"name": "lift_hold_place"}
-# Solid colours far apart, one per frame and camera of a short video.
-PALETTE = np.array(
-    [
-        (230, 25, 75),
-        (60, 180, 75),
-        (255, 225, 25),
-        (0, 130, 200),
-        (245, 130, 48),
-        (145, 30, 180),
-        (70, 240, 240),
-        (240, 50, 230),
-        (210, 245, 60),
-        (0, 128, 128),
-    ],
-    dtype=np.uint8,
-)
-# Contacts per frame: with two frames per row group, the first group holds none.
-CONTACTS = (0, 0, 1, 2, 0, 3)
-DROP = object()
-POSIX = pytest.mark.skipif(sys.platform == "win32", reason="uses a shell script")
-
-
-def _has_av1():
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        return False
-    encoders = subprocess.run(
-        [ffmpeg, "-hide_banner", "-encoders"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout
-    return "libsvtav1" in encoders
-
-
-needs_av1 = pytest.mark.skipif(not _has_av1(), reason="needs ffmpeg with libsvtav1")
-
-
-def make_spec(channels=NO_RGB, frames_per_row_group=2, version="0.0.1", **kwargs):
-    return DatasetSpec(
-        name="unit-test",
-        version=version,
-        fps=30,
-        recorded_fps=60,
-        image_size={"front": (H, W), "wrist": (H, W)},
-        channels=channels,
-        frames_per_row_group=frames_per_row_group,
-        **kwargs,
-    )
-
-
-def colour(step, camera):
-    return PALETTE[(2 * step + fmt.CAMERAS.index(camera)) % len(PALETTE)]
-
-
-def intrinsics(camera):
-    f = 50.0 if camera == "front" else 40.0
-    return np.array([[f, 0.0, (W - 1) / 2], [0.0, 1.1 * f, (H - 1) / 2], [0, 0, 1.0]])
-
-
-def world_to_camera(step, camera):
-    angle = 0.1 * step + (0.5 if camera == "wrist" else 0.0)
-    c, s = np.cos(angle), np.sin(angle)
-    matrix = np.eye(4)
-    matrix[:3, :3] = [[c, -s, 0.0], [0.0, 0.0, -1.0], [s, c, 0.0]]
-    matrix[:3, 3] = [0.1 * step, -0.2, 0.6]
-    return matrix
-
-
-def deformation(step):
-    f = np.tile(np.eye(3), (T, 1, 1))
-    f[:, 0, 1] = 0.01 * step + 0.001 * np.arange(T)
-    f[:, 2, 0] = -0.02
-    return f
-
-
-def contacts(step, n):
-    force = np.arange(3 * n, dtype=float).reshape(n, 3) + step
-    return {
-        "force.contact_force": force,
-        "force.contact_point_world": 0.01 * force,
-        "force.contact_particle": np.arange(n) + 10 * step,
-        "force.contact_is_ground": np.arange(n) % 2 == 0,
-        "force.contact_is_robot": np.arange(n) % 2 == 1,
-    }
-
-
-def state(step):
-    return {
-        "robot.ee_pose_cmd": np.array([0.0, 0.0, 0.2, 0.0, 0.0, 0.0, 1.0]),
-        "robot.ee_pose": np.array([0.01 * step, 0.0, 0.2, 0.0, 0.0, 0.0, 1.0]),
-        "robot.arm_q_setpoint": np.linspace(0.0, 1.0, 6) + step,
-        "robot.arm_q": np.linspace(0.0, 1.0, 6) + step + 0.001,
-        "robot.gripper_width_cmd_m": 0.05,
-        "robot.gripper_width_setpoint_m": 0.05,
-        "robot.gripper_width_m": 0.05 - 0.001 * step,
-        "robot.grip_contact_width_m": np.nan if step < 6 else 0.04,
-        "robot.waypoint": step // 4,
-        "robot.phase": "lift",
-        "object.centroid": np.array([0.0, 0.0, 0.01 * step]),
-        "object.bbox_min": np.array([-0.02, -0.02, 0.01 * step - 0.02]),
-        "object.bbox_max": np.array([0.02, 0.02, 0.01 * step + 0.02]),
-        "object.n_robot_contacts": 2,
-    }
-
-
-def make_frame(step, spec, n_contacts=2):
-    rng = np.random.default_rng(step)
-    frame = {"sim_step": step, "source_frame_index": step - 1}
-    for camera in spec.cameras:
-        if "rgb" in spec.channels:
-            frame[f"rgb.{camera}.image"] = np.broadcast_to(
-                colour(step, camera), (H, W, 3)
-            ).copy()
-        if "depth" in spec.channels:
-            depth = rng.random((H, W), dtype=np.float32)
-            depth[0, :2] = (np.inf, np.nan)  # depth has no value rule
-            frame[f"depth.{camera}.depth_m"] = depth
-        if "segmentation" in spec.channels:
-            frame[f"segmentation.{camera}.mask"] = rng.integers(
-                0, 6, (H, W), dtype=np.uint8
-            )
-        frame[f"camera.{camera}.intrinsics"] = intrinsics(camera)
-        frame[f"camera.{camera}.world_to_camera"] = world_to_camera(step, camera)
-    if "force" in spec.channels:
-        frame.update(contacts(step, n_contacts))
-        frame["force.gripper_net_force"] = np.array([0.1, 0.2, 0.3]) * step
-        frame["force.ground_net_force"] = np.array([-0.1, 0.0, 9.8])
-        frame["force.gripper_force_mag"] = 1.5 * step
-        frame["force.ground_force_mag"] = 0.5
-    if "stress" in spec.channels:
-        valid = (np.arange(T) + step) % 3 != 0
-        frame["stress.von_mises"] = np.where(
-            valid, 1000.0 * step + np.arange(T), np.nan
-        ).astype(np.float32)
-        frame["stress.valid"] = valid
-        frame["stress.volume_ratio"] = 1.0 + 0.001 * np.arange(T)
-    if "deformation_gradient" in spec.channels:
-        frame["deformation_gradient.F"] = deformation(step)
-    frame.update(state(step))
-    frame.update({"object.n_soft_contacts": n_contacts, "object.n_rigid_contacts": 0})
-    return frame
-
-
-def make_step(step, finite=True):
-    row = state(step)
-    row.update(
-        {
-            "sim_step": step,
-            "finite": finite,
-            "force.gripper_force_mag": 1.5 * step,
-            "force.ground_force_mag": 0.5,
-        }
-    )
-    if not finite:
-        row.update(dict.fromkeys(fmt.NOT_FINITE_COLUMNS))
-    return row
-
-
-# What a step whose object state is not finite changes, as make_step writes it.
-NON_FINITE = {"finite": False, **dict.fromkeys(fmt.NOT_FINITE_COLUMNS)}
-FORCE_MAGNITUDES = ("force.gripper_force_mag", "force.ground_force_mag")
-
-
-def open_episode(recorder, uid="ep-0", object_type="apple", **kwargs):
-    kwargs = {
-        "object_asset": f"{object_type}_01",
-        "n_tets": T,
-        "label": "success",
-        "facts": FACTS,
-        "source_n_frames": None,
-        "task": TASK,
-        **kwargs,
-    }
-    return recorder.episode(episode_uid=uid, object_type=object_type, **kwargs)
-
-
-def fill(episode, n_frames=3):
-    """Frames at steps 2, 4, ... and the trajectory up to the last of them."""
-    spec = episode.spec
-    frames = [
-        make_frame(spec.stride * (i + 1), spec, CONTACTS[i % len(CONTACTS)])
-        for i in range(n_frames)
-    ]
-    for frame in frames:
-        episode.add_frame(frame)
-    for step in range(1, frames[-1]["sim_step"] + 1):
-        episode.add_step(make_step(step, finite=step != 3))
-    return frames
-
-
-def write_episode(recorder, uid="ep-0", object_type="apple", n_frames=5, **kwargs):
-    with open_episode(recorder, uid, object_type, **kwargs) as episode:
-        return fill(episode, n_frames)
-
-
-def rewrite(path, change):
-    """Rewrite a Parquet file through change(table, footer) -> (table, footer)."""
-    table = pq.read_table(path)
-    footer = episode_metadata(path)
-    table, footer = change(table, footer)
-    metadata = None if footer is None else {fmt.METADATA_KEY: json.dumps(footer)}
-    pq.write_table(table.replace_schema_metadata(metadata), path)
-
-
-def edit(array, index, value):
-    out = np.array(array, dtype=float)
-    out[index] = value
-    return out
-
-
-def files_under(root):
-    return sorted(
-        p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
-    )
-
 
 # --- writing and reading -----------------------------------------------------------
 
@@ -347,7 +150,11 @@ def test_an_episode_reads_back_as_written(tmp_path):
     assert (meta["n_frames"], meta["n_steps"], meta["n_tets"]) == (5, 10, T)
     assert (meta["source_n_frames"], meta["source_cut_at_row"]) == (10, -1)
     assert (meta["facts"], meta["task"]) == (FACTS, TASK)
-    assert (meta["video"], meta["ffmpeg_version"]) == (None, None)
+    assert (meta["video"], meta["ffmpeg_version"], meta["video_sha256"]) == (
+        None,
+        None,
+        None,
+    )
     assert episode_metadata(files.trajectory) == meta
 
     schema = pq.read_schema(files.frames)
@@ -791,6 +598,34 @@ def test_the_reached_state_must_be_finite_on_a_finite_step(tmp_path):
         ),
         ({"task": {"tol": float("nan")}}, ValueError, "JSON without NaN"),
         ({"source_n_frames": 2.5}, TypeError, "cannot be interpreted as an integer"),
+        # A name every file system a copy lands on can hold.
+        ({"uid": "CON"}, ValueError, "episode_uid must not be a device name"),
+        ({"uid": "nul.ep"}, ValueError, "episode_uid must not be a device name"),
+        ({"object_type": "LPT9"}, ValueError, "object_type must not be a device name"),
+        ({"object_type": "pear."}, ValueError, "object_type must not end in a dot"),
+        ({"uid": "e" * 101}, ValueError, "episode_uid must be at most 100 characters"),
+        ({"object_asset": " "}, ValueError, "object_asset must not be empty"),
+        ({"n_tets": 2.0}, TypeError, "cannot be interpreted as an integer"),
+        (
+            {"facts": {**FACTS, "material": {"E_pa": 10**400}}},
+            ValueError,
+            r"integers beyond int64: is not JSON: 1000000000.* is out of the int64",
+        ),
+        ({"header": {"seed": -(2**63) - 1}}, ValueError, "out of the int64 range"),
+        ({"task": ["lift"]}, TypeError, "task must be a mapping or None"),
+        ({"header": "v1"}, TypeError, "header must be a mapping or None"),
+        (
+            {"generation_provenance": "abc123"},
+            TypeError,
+            "generation_provenance must be a mapping or None",
+        ),
+        ({"export_provenance": [1]}, TypeError, "export_provenance must be a mapping"),
+        ({"source_n_frames": -1}, ValueError, "source_n_frames must not be negative"),
+        (
+            {"source_cut_at_row": -2},
+            ValueError,
+            "source_cut_at_row must be a row or -1",
+        ),
     ],
 )
 def test_episode_arguments_are_checked(tmp_path, change, error, message):
@@ -798,6 +633,49 @@ def test_episode_arguments_are_checked(tmp_path, change, error, message):
     with pytest.raises(error, match=message):
         open_episode(recorder, **change)
     assert files_under(tmp_path) == []
+
+
+def test_an_episode_states_a_source_count_of_at_least_its_steps(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    with pytest.raises(
+        ValueError,
+        match="metadata source_n_frames is 9, not null or an integer of at least "
+        "n_steps, 10",
+    ):
+        write_episode(recorder, source_n_frames=9)
+    assert files_under(tmp_path) == []
+    write_episode(recorder, source_n_frames=10)
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("robot.arm_q", np.linspace(0.0, 1.0, 6) + 2.5),
+        ("robot.phase", "hold"),
+        ("robot.waypoint", 7),
+        ("object.centroid", np.array([0.0, 0.0, 0.03])),
+        ("robot.grip_contact_width_m", 0.04),
+        ("force.gripper_force_mag", 2.0),
+    ],
+)
+def test_a_frame_holds_the_trajectorys_values_at_its_step(tmp_path, column, value):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    message = f"{column} differs between the frame and the trajectory at this step"
+    with open_episode(recorder) as episode:
+        # The step first: the frame is refused.
+        episode.add_step(make_step(1))
+        episode.add_step(make_step(2))
+        with pytest.raises(ValueError, match=f"frame 0: {message}"):
+            episode.add_frame({**make_frame(2, recorder.spec), column: value})
+        episode.add_frame(make_frame(2, recorder.spec))
+        # The frame first: the step is refused.
+        episode.add_frame({**make_frame(4, recorder.spec), column: value})
+        episode.add_step(make_step(3))
+        with pytest.raises(ValueError, match=f"step 3: {message}"):
+            episode.add_step(make_step(4))
+        episode.add_step({**make_step(4), column: value})
+    data = read_frames(recorder.files("apple", "ep-0").frames)
+    assert data["sim_step"].tolist() == [2, 4]
 
 
 def test_an_episode_states_the_generators_frame_count(tmp_path):
@@ -829,6 +707,10 @@ def test_an_episode_states_the_generators_frame_count(tmp_path):
         ),
         ({"image_size": {}}, "image size of at least one camera"),
         ({"frames_per_row_group": 0}, "frames_per_row_group must be at least 1"),
+        (
+            {"image_size": {"front": (2**16, 2**15)}},
+            "front image size must hold at most 2,147,483,647 pixels",
+        ),
     ],
 )
 def test_a_dataset_spec_is_checked(change, message):
@@ -859,6 +741,36 @@ def test_a_dataset_spec_is_checked(change, message):
 )
 def test_video_settings_are_ones_the_encoder_applies(change, message):
     with pytest.raises(ValueError, match=message):
+        VideoSpec(**change)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"fps": 30.0},
+        {"recorded_fps": True},
+        {"image_size": {"front": (64.0, W)}},
+        {"image_size": {"front": (H, "96")}},
+    ],
+)
+def test_rates_and_image_sizes_are_integers(change):
+    kwargs = {"fps": 30, "recorded_fps": 60, "image_size": {"front": (H, W)}, **change}
+    with pytest.raises(TypeError, match="must be an integer"):
+        DatasetSpec(name="unit-test", version="0.0.1", channels=NO_RGB, **kwargs)
+    spec = DatasetSpec(
+        name="unit-test",
+        version="0.0.1",
+        fps=np.int64(30),
+        recorded_fps=60,
+        image_size={"front": (np.int32(H), W)},
+        channels=NO_RGB,
+    )
+    assert (type(spec.fps), type(spec.image_size["front"][0])) == (int, int)
+
+
+@pytest.mark.parametrize("change", [{"crf": 30.5}, {"gop": True}, {"preset": "8"}])
+def test_video_settings_are_integers(change):
+    with pytest.raises(TypeError, match="must be an integer"):
         VideoSpec(**change)
 
 
@@ -1471,63 +1383,6 @@ def test_finalize_refuses_a_doi_or_url_of_another_form(tmp_path, doi, url, messa
 # --- video ----------------------------------------------------------------------
 
 
-def _box(kind, payload):
-    return struct.pack(">I4s", 8 + len(payload), kind) + payload
-
-
-def sample_entry(codec=b"av01", width=W, height=H, flags=0x0C, av1c=True):
-    """A visual sample entry; flags is the third byte of av1C (0x0C: 8-bit 4:2:0)."""
-    body = (
-        bytes(6)
-        + struct.pack(">H", 1)
-        + bytes(16)
-        + struct.pack(">HHII", width, height, 0x00480000, 0x00480000)
-        + bytes(4)
-        + struct.pack(">H", 1)
-        + bytes(32)
-        + struct.pack(">Hh", 0x18, -1)
-    )
-    child = b""
-    if codec == b"av01" and av1c:
-        child = _box(b"av1C", bytes([0x81, 0x00, flags, 0x00]))
-    return _box(codec, body + child)
-
-
-def minimal_mp4(
-    n_frames,
-    timescale=15360,
-    delta=512,
-    fragmented=False,
-    entry=None,
-    handler=b"vide",
-    mdhd=None,
-    descriptions=1,
-    runs=None,
-):
-    """An MP4 index; runs are the time-to-sample table's (count, duration) pairs."""
-    if mdhd is None:
-        mdhd = _box(b"mdhd", bytes(4) + struct.pack(">III", 0, 0, timescale) + bytes(8))
-    hdlr = _box(b"hdlr", bytes(8) + handler + bytes(12) + b"\0")
-    entries = (entry or sample_entry()) * descriptions
-    stsd = _box(b"stsd", bytes(4) + struct.pack(">I", descriptions) + entries)
-    stsz = _box(
-        b"stsz", bytes(4) + struct.pack(">II", 0, n_frames) + bytes(4 * n_frames)
-    )
-    runs = runs or [(n_frames, delta)]
-    stts = _box(
-        b"stts",
-        bytes(4)
-        + struct.pack(">I", len(runs))
-        + b"".join(struct.pack(">II", *run) for run in runs),
-    )
-    stbl = _box(b"stbl", stsd + stts + stsz)
-    trak = _box(b"trak", _box(b"mdia", hdlr + _box(b"minf", stbl) + mdhd))
-    body = _box(b"ftyp", b"isom" + bytes(4)) + _box(b"moov", trak)
-    if fragmented:
-        body += _box(b"moof", b"")
-    return body + _box(b"mdat", bytes(16))
-
-
 def test_video_frames_are_counted_from_the_index(tmp_path):
     path = tmp_path / "video.mp4"
     path.write_bytes(minimal_mp4(450))
@@ -1609,29 +1464,101 @@ def test_a_video_that_is_not_the_cameras_is_found_from_its_index(
     assert re.match(message, fmt.video_error(track, (H, W), 30, 4))
 
 
-def _fake_ffmpeg(directory, script):
-    path = directory / "ffmpeg"
-    path.write_text(f"#!/bin/sh\n{script}\n")
-    path.chmod(0o755)
-    return str(path)
+@pytest.mark.parametrize(
+    ("mp4", "message"),
+    [
+        # mdhd's duration is not the samples' total: a player cuts or pads the video.
+        (
+            minimal_mp4(4, duration=3 * 512),
+            "its media lasts 1536 units, its frames 2048",
+        ),
+        # One edit at media time 0, rate 1, that lasts as long as every frame.
+        (minimal_mp4(4, edits=[(66, 0, 1, 0)]), "its edit list does not play every"),
+        (minimal_mp4(4, edits=[(134, 512, 1, 0)]), "its edit list does not play every"),
+        (minimal_mp4(4, edits=[(134, 0, 2, 0)]), "its edit list does not play every"),
+        (minimal_mp4(4, edits=[(134, 0, 1, 1)]), "its edit list does not play every"),
+        (
+            minimal_mp4(4, edits=[(17, -1, 1, 0), (134, 0, 1, 0)]),
+            "its edit list does not play every",
+        ),
+        (minimal_mp4(4, edits=[]), "its edit list does not play every"),
+        (minimal_mp4(4, ctts=[0, 512, 0, 0]), r"shows its frames out of their stored"),
+    ],
+)
+def test_a_video_shows_every_frame_in_order(tmp_path, mp4, message):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(mp4)
+    (track,) = video_tracks(path)
+    (error,) = fmt.video_errors(track, (H, W), 30, 4)
+    assert re.match(message, error)
+    assert fmt.video_error(track, (H, W), 30, 4) == error
 
 
-def fake_encoder(directory, video, version="ffmpeg version 0.0-test"):
-    """An ffmpeg that lists libsvtav1 and writes the MP4 video for every encoding, or
-    fails every encoding when video is None."""
-    directory.mkdir(parents=True, exist_ok=True)
-    encode = "echo 'cannot encode' >&2; exit 1"
-    if video is not None:
-        (directory / "ffmpeg.mp4").write_bytes(video)
-        encode = 'for last; do :; done; cp "$0.mp4" "$last"'
-    return _fake_ffmpeg(
-        directory,
-        'case "$2" in\n'
-        "  -encoders) echo ' ------'; echo ' V....D libsvtav1  SVT-AV1 (codec av1)';;\n"
-        f"  -version) echo '{version}';;\n"
-        f"  *) cat > /dev/null; {encode};;\n"
-        "esac",
-    )
+@pytest.mark.parametrize(
+    "mp4",
+    [
+        minimal_mp4(4),
+        minimal_mp4(4, edits=None),
+        minimal_mp4(4, edits=[(500, 0, 1, 0)]),
+        minimal_mp4(4, ctts=[0, 0, 0, 0]),
+        minimal_mp4(4, mdhd=mp4_index.mdhd(15360, 2048, version=1)),
+        minimal_mp4(4, movie_timescale=600, edits=[(80, 0, 1, 0)]),
+    ],
+)
+def test_a_video_index_as_muxers_write_it_is_the_cameras(tmp_path, mp4):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(mp4)
+    (track,) = video_tracks(path)
+    assert fmt.video_errors(track, (H, W), 30, 4) == []
+
+
+def _without(data, kind):
+    """data with every box of this kind renamed, so that no reader finds it."""
+    return data.replace(kind, b"free")
+
+
+@pytest.mark.parametrize(
+    ("mp4", "message"),
+    [
+        (_without(minimal_mp4(4), b"mvhd"), "a moov box without mvhd"),
+        (
+            minimal_mp4(4, mvhd_box=mp4_index.full_box(b"mvhd", 0, bytes(8))),
+            "a truncated mvhd box",
+        ),
+        (
+            minimal_mp4(
+                4,
+                edts_box=mp4_index.box(
+                    b"edts",
+                    mp4_index.full_box(b"elst", 0, struct.pack(">I", 2) + bytes(12)),
+                ),
+            ),
+            "a truncated elst box",
+        ),
+        (
+            minimal_mp4(4, mdhd=mp4_index.full_box(b"mdhd", 1, bytes(24))),
+            "a truncated mdhd box",
+        ),
+        (
+            minimal_mp4(
+                4,
+                ctts_box=mp4_index.box(
+                    b"ctts", bytes(4) + struct.pack(">I", 2) + bytes(8)
+                ),
+            ),
+            "a truncated ctts box",
+        ),
+        (_without(minimal_mp4(4), b"stts"), "without a time-to-sample table"),
+        (_without(minimal_mp4(4), b"stsz"), "without a sample size table"),
+        (minimal_mp4(4, moov_boxes=2), "two moov boxes"),
+        (b"", "no moov box"),
+    ],
+)
+def test_an_index_box_that_is_not_whole_cannot_be_read(tmp_path, mp4, message):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(mp4)
+    with pytest.raises(ValueError, match=message):
+        video_tracks(path)
 
 
 @POSIX
@@ -1744,6 +1671,10 @@ def test_rgb_is_written_as_av1_video(tmp_path):
         assert (track.codec, track.width, track.height) == ("av01", W, H)
         assert (track.bit_depth, track.chroma) == (8, "4:2:0")
         assert (track.n_frames, track.fps) == (4, 30)
+        # ffmpeg's edit list plays every frame from the first, in order.
+        assert track.duration == track.samples_duration == 4 * 512
+        assert track.edits is not None and track.edits[0][1:] == (0, 1, 0)
+        assert fmt.video_errors(track, (H, W), 30, 4) == []
         decoded = read_video(files.videos[camera], (H, W), n_frames=4)
         assert decoded.shape == (4, H, W, 3)
         assert decoded.flags.writeable
@@ -1761,6 +1692,9 @@ def test_rgb_is_written_as_av1_video(tmp_path):
     meta = episode_metadata(files.frames)
     assert meta["video"] == VideoSpec().record()
     assert meta["ffmpeg_version"] == video_module.ffmpeg_version(shutil.which("ffmpeg"))
+    assert meta["video_sha256"] == {
+        c: hashlib.sha256(files.videos[c].read_bytes()).hexdigest() for c in fmt.CAMERAS
+    }
 
     metadata = recorder.finalize()
     assert metadata["video"] == {
@@ -1769,6 +1703,64 @@ def test_rgb_is_written_as_av1_video(tmp_path):
     }
     assert sum(f["kind"] == "video" for f in metadata["files"]) == 2
     assert metadata["counts"]["n_files"] == 4
+
+
+@POSIX
+def test_the_footer_holds_each_videos_sha256(tmp_path):
+    recorder = GraspDataRecorder(
+        tmp_path / "root", make_spec(fmt.CHANNELS), ffmpeg=fake_av1(tmp_path / "bin")
+    )
+    write_episode(recorder, uid="ep-0", n_frames=3)
+    write_episode(recorder, uid="ep-1", n_frames=3, label="fail", frame=_darker)
+    digests = []
+    for uid in ("ep-0", "ep-1"):
+        files = recorder.files("apple", uid)
+        meta = episode_metadata(files.frames)
+        assert meta["video_sha256"] == {
+            c: hashlib.sha256(files.videos[c].read_bytes()).hexdigest()
+            for c in fmt.CAMERAS
+        }
+        assert episode_metadata(files.trajectory) == meta
+        digests.append(meta["video_sha256"])
+    # Two episodes' videos differ, so the digest ties each video to its episode.
+    assert digests[0]["front"] != digests[1]["front"]
+    recorder.finalize()
+
+
+def _darker(step, spec, n_contacts=2):
+    frame = make_frame(step, spec, n_contacts)
+    for camera in spec.cameras:
+        frame[f"rgb.{camera}.image"] //= 2
+    return frame
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        (b'{"a": NaN}', "is not JSON: NaN is not a number"),
+        (b'{"a": -Infinity}', "is not JSON: -Infinity is not a number"),
+        (b'{"a": 1e400}', "is not JSON: 1e400 is out of the float64 range"),
+        (b'{"a": 9223372036854775808}', "is out of the int64 range"),
+        (b'{"a": -9223372036854775809}', "is out of the int64 range"),
+        (b'{"a": ' + b"9" * 5000 + b"}", r"9999\.\.\. \(5,000 characters\) is out"),
+        (b'{"a": 1, "a": 2}', "the key 'a' is repeated in an object"),
+        (b'{"a": {"b": 1, "b": 1}}', "the key 'b' is repeated in an object"),
+        (b"[1, 2]", "is not a JSON object"),
+        (b'{"a": "\xff"}', "is not UTF-8"),
+        (b"\xef\xbb\xbf{}", "is not JSON"),
+        (b"[" * 100000, "is not JSON"),
+    ],
+)
+def test_the_footer_is_strict_json(raw, message):
+    with pytest.raises(ValueError, match=message):
+        fmt.parse_footer(raw)
+
+
+def test_the_footer_keeps_every_number_it_can_hold():
+    footer = fmt.parse_footer(
+        b'{"i": 9223372036854775807, "j": -9223372036854775808, "f": 1.7e308}'
+    )
+    assert footer == {"i": 2**63 - 1, "j": -(2**63), "f": 1.7e308}
 
 
 @POSIX

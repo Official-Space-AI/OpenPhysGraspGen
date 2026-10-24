@@ -52,6 +52,8 @@ class DatasetSpec:
             value = getattr(self, key)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{key} must be a nonempty string")
+        for key in ("fps", "recorded_fps"):
+            object.__setattr__(self, key, _integer(key, getattr(self, key)))
         if self.fps < 1 or self.recorded_fps < 1 or self.recorded_fps % self.fps:
             raise ValueError("fps must be positive and divide recorded_fps")
         unknown = sorted(set(self.channels) - set(fmt.CHANNELS))
@@ -64,9 +66,15 @@ class DatasetSpec:
         sizes = {}
         for camera in fmt.CAMERAS:
             if camera in self.image_size:
-                height, width = (int(v) for v in self.image_size[camera])
+                height, width = (
+                    _integer(f"{camera} image size", v) for v in self.image_size[camera]
+                )
                 if height < 1 or width < 1:
                     raise ValueError(f"{camera} image size must be positive")
+                if height * width > fmt.MAX_PIXELS:
+                    raise ValueError(
+                        f"{camera} image size must hold at most {fmt.MAX_PIXELS:,} pixels"
+                    )
                 if "rgb" in channels and (height % 2 or width % 2):
                     raise ValueError(
                         f"{camera} video frames need an even width and height"
@@ -179,11 +187,23 @@ def _check_encodings(path: Path, options: dict[str, Any]) -> None:
                 )
 
 
+def _integer(name: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise TypeError(f"{name} must be an integer, got {value!r}")
+    return int(value)
+
+
 def _dumps(value: Any, what: str) -> str:
+    """value as the compact JSON the check reads back: no NaN or infinity, integers
+    that fit int64."""
     try:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        text = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        fmt.parse_footer(text)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{what} must be JSON without NaN or infinity: {exc}") from exc
+        raise ValueError(
+            f"{what} must be JSON without NaN, infinity or integers beyond int64: {exc}"
+        ) from exc
+    return text
 
 
 def _cast(name: str, array: np.ndarray, dtype: np.dtype) -> np.ndarray:
@@ -339,6 +359,9 @@ class EpisodeWriter:
         }
         self._steps: list[dict[str, Any]] = []
         self._frame_steps: list[int] = []
+        # The shared values of each frame whose step the trajectory does not hold yet.
+        self._pending: dict[int, dict[str, Any]] = {}
+        self._shared = [n for n in fmt.SHARED_COLUMNS if n in self._columns]
         self._writer: pq.ParquetWriter | None = None
         self._ffmpeg = ffmpeg
         self._ffmpeg_version = ffmpeg_version
@@ -396,7 +419,9 @@ class EpisodeWriter:
 
     def add_frame(self, frame: Mapping[str, Any]) -> None:
         """One published frame. Frames are consecutive on the fps grid: each one's
-        sim_step is the previous one's plus recorded_fps / fps.
+        sim_step is the previous one's plus recorded_fps / fps. Its robot and object
+        values and force magnitudes must equal the trajectory's at its step, whichever
+        of the two is added first.
 
         camera.<camera>.world_to_camera must be rigid to within 1e-6, which a rotation
         computed in float32 can miss: compute it in float64.
@@ -459,6 +484,11 @@ class EpisodeWriter:
                 name, frame[name], dtype, self._expected_shape(name, shape)
             )
         self._check_values(row, contacts)
+        shared = {name: row[name] for name in self._shared}
+        if step <= len(self._steps):
+            problem = fmt.state_error(shared, self._steps[step - 1])
+            if problem:
+                raise ValueError(f"frame {self.n_frames}: {problem}")
         images = {}
         for camera in self.files.videos:
             image = np.asarray(frame[f"rgb.{camera}.image"])
@@ -489,6 +519,8 @@ class EpisodeWriter:
         for key, array in contacts.items():
             self._contacts[key].append(array)
         self._frame_steps.append(step)
+        if step > len(self._steps):
+            self._pending[step] = shared
         if len(self._frame_steps) % self.spec.frames_per_row_group == 0:
             self._flush()
 
@@ -546,9 +578,12 @@ class EpisodeWriter:
         problem = fmt.trajectory_row_error(
             row, self._steps[-1]["sim_step"] if self._steps else None
         )
+        if sim_step in self._pending:
+            problem = problem or fmt.state_error(self._pending[sim_step], row)
         if problem:
             raise ValueError(f"{where}: {problem}")
         self._steps.append(row)
+        self._pending.pop(sim_step, None)
 
     def _flush(self) -> None:
         n = len(self._buffer["sim_step"])
@@ -591,7 +626,7 @@ class EpisodeWriter:
         )
         return pa.ListArray.from_arrays(pa.array(offsets), structs, type=type_)
 
-    def _metadata(self) -> dict[str, bytes]:
+    def _metadata(self, digests: dict[str, str]) -> dict[str, bytes]:
         info = dict(self.info)
         video = self.spec.video.record() if self.files.videos else None
         info.update(
@@ -619,8 +654,17 @@ class EpisodeWriter:
                 "ffmpeg_version": None
                 if video is None
                 else self._ffmpeg_version or "unknown",
+                # Each video's sha256 ties it to this episode by content.
+                "video_sha256": None if video is None else digests,
             }
         )
+        problems = fmt.footer_errors(
+            info, info["object_type"], info["episode_uid"], self.n_frames
+        )
+        if problems:
+            raise ValueError(
+                "the episode's footer breaks the format: " + "; ".join(problems)
+            )
         return {fmt.METADATA_KEY: _dumps(info, "the episode metadata")}
 
     def close(self) -> EpisodeFiles:
@@ -635,7 +679,18 @@ class EpisodeWriter:
                     f"the trajectory lacks frame steps, first {unrecorded[0]}"
                 )
             self._flush()
-            metadata = self._metadata()
+            for camera, encoder in self._encoders.items():
+                encoder.close()
+                if encoder.n_frames != self.n_frames:
+                    raise RuntimeError(
+                        f"the {camera} video holds {encoder.n_frames} frames, "
+                        f"the episode {self.n_frames}"
+                    )
+            digests = {
+                camera: fmt.sha256_file(_part(path))[0]
+                for camera, path in self.files.videos.items()
+            }
+            metadata = self._metadata(digests)
             assert self._writer is not None
             self._writer.add_key_value_metadata(metadata)
             self._writer.close()
@@ -658,13 +713,6 @@ class EpisodeWriter:
             ) as writer:
                 writer.write_table(trajectory)
                 writer.add_key_value_metadata(metadata)
-            for camera, encoder in self._encoders.items():
-                encoder.close()
-                if encoder.n_frames != self.n_frames:
-                    raise RuntimeError(
-                        f"the {camera} video holds {encoder.n_frames} frames, "
-                        f"the episode {self.n_frames}"
-                    )
             self._check_claim()
         except BaseException:
             self.abort()
@@ -774,47 +822,66 @@ class GraspDataRecorder:
     ) -> EpisodeWriter:
         """Start writing an episode.
 
-        facts holds each of the kinds material, placement, lighting and camera as a
-        mapping with at least one value that is not null. source_n_frames is the
+        episode_uid and object_type become path components: each matches
+        [A-Za-z0-9][A-Za-z0-9._-]*, has at most 100 characters, does not end in a dot
+        and is no device name Windows reserves (CON, NUL, COM1, ...). facts holds each
+        of the kinds material, placement, lighting and camera as a mapping with at least
+        one value that is not null, and its integers fit int64. source_n_frames is the
         generator's frame count, which n_steps equals when the trajectory holds every
-        step it recorded; it is required, and None only when the count is unknown. task
-        is free-form until the PG-T1 scorer defines its keys.
+        step it recorded; it is required, None only when the count is unknown, and at
+        least n_steps. task is free-form until the PG-T1 scorer defines its keys; task,
+        header and the provenance records are mappings or None.
         """
         for key, value in (("episode_uid", episode_uid), ("object_type", object_type)):
             if not isinstance(value, str):
                 raise TypeError(f"{key} must be a string")
-            if not fmt.NAME_PATTERN.fullmatch(value):
-                raise ValueError(
-                    f"{key} must match {fmt.NAME_PATTERN.pattern}: {value!r}"
-                )
+            problem = fmt.name_error(value)
+            if problem:
+                raise ValueError(f"{key} {problem}: {value!r}")
         if not isinstance(object_asset, str):
             raise TypeError("object_asset must be a string")
-        if not object_asset:
+        if not object_asset.strip():
             raise ValueError("object_asset must not be empty")
         if label not in fmt.LABELS:
             raise ValueError(f"label must be one of {fmt.LABELS}")
-        if int(n_tets) < 1:
+        if operator.index(n_tets) < 1:
             raise ValueError("n_tets must be at least 1")
         if not isinstance(facts, Mapping):
             raise TypeError("facts must be a mapping")
         problem = fmt.facts_error(facts)
         if problem:
             raise ValueError(problem)
+        for key, value in (
+            ("task", task),
+            ("header", header),
+            ("generation_provenance", generation_provenance),
+            ("export_provenance", export_provenance),
+        ):
+            if value is not None and not isinstance(value, Mapping):
+                raise TypeError(f"{key} must be a mapping or None")
+        if source_n_frames is not None and operator.index(source_n_frames) < 0:
+            raise ValueError("source_n_frames must not be negative")
+        if operator.index(source_cut_at_row) < -1:
+            raise ValueError("source_cut_at_row must be a row or -1")
         info = {
             "episode_uid": episode_uid,
             "object_type": object_type,
             "object_asset": object_asset,
-            "n_tets": int(n_tets),
+            "n_tets": operator.index(n_tets),
             "label": label,
             "facts": dict(facts),
             "task": None if task is None else dict(task),
             "header": None if header is None else dict(header),
-            "generation_provenance": generation_provenance,
-            "export_provenance": export_provenance,
+            "generation_provenance": None
+            if generation_provenance is None
+            else dict(generation_provenance),
+            "export_provenance": None
+            if export_provenance is None
+            else dict(export_provenance),
             "source_n_frames": None
             if source_n_frames is None
             else operator.index(source_n_frames),
-            "source_cut_at_row": int(source_cut_at_row),
+            "source_cut_at_row": operator.index(source_cut_at_row),
         }
         # A copy, so that the caller can reuse or change its mappings.
         info = json.loads(_dumps(info, "the episode metadata"))
