@@ -1,5 +1,6 @@
 # OpenPhysGraspGen
 
+[![CI](https://github.com/Official-Space-AI/OpenPhysGraspGen/actions/workflows/ci.yml/badge.svg)](https://github.com/Official-Space-AI/OpenPhysGraspGen/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Status](https://img.shields.io/badge/status-public%20beta-orange)
@@ -35,7 +36,14 @@ this repository. See [Scope of the open release](#scope-of-the-open-release).
 
 ## Install
 
-Python 3.10 or newer. The package is not on PyPI yet.
+Python 3.10 or newer. The package is `physgraspgen` and is published on PyPI from
+`1.0.0rc1`:
+
+```bash
+pip install physgraspgen
+```
+
+Until that release, install from GitHub:
 
 ```bash
 pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
@@ -46,8 +54,12 @@ For development:
 ```bash
 git clone https://github.com/Official-Space-AI/OpenPhysGraspGen.git
 cd OpenPhysGraspGen
-pip install -e .
+pip install -e ".[dev]"
+ruff check . && ruff format --check .
+pytest
 ```
+
+The same checks run in CI on every pull request, with tests on Python 3.10 to 3.14.
 
 ## Quick start
 
@@ -55,7 +67,7 @@ Run the end-to-end reference pipeline (calibration → transfer → data generat
 estimation → confidence gate) on a small synthetic problem:
 
 ```bash
-openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
+physgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 ```
 
 It prints a JSON summary with the calibrated and transferred parameters, the number
@@ -66,7 +78,7 @@ Evaluate a constitutive law directly:
 
 ```python
 import numpy as np
-from openphysgraspgen import YeohParams, cauchy_stress, von_mises_stress
+from physgraspgen import YeohParams, cauchy_stress, von_mises_stress
 
 silicone = YeohParams(c10=0.12e6, c20=0.01e6, c30=0.0, nu=0.45)
 F = np.diag([1.2, 0.92, 0.92])  # uniaxial stretch
@@ -77,7 +89,7 @@ print(von_mises_stress(sigma))  # about 1.4e5 Pa
 Record contact force labels from a Newton simulation:
 
 ```python
-from openphysgraspgen import DeformableContactSensor, SensorRecorder, SimFrame
+from physgraspgen import DeformableContactSensor, SensorRecorder, SimFrame
 
 recorder = SensorRecorder([DeformableContactSensor(contact_provenance="newton-vbd")])
 frame = SimFrame(
