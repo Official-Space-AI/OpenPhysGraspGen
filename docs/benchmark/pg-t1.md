@@ -12,8 +12,13 @@ judged under two criteria read from the same recording:
 | C | 5 cm, with the lowest point 5 mm off the bench | 2 s | the criterion the project agreed to report |
 | B | 12 cm | 4 s | the benchmark criterion of the public table |
 
-Every verdict comes from the recorded trajectory of the object and the robot, not from waypoint
-timing, so the published table can be recomputed from the dataset alone, on a CPU. The scorer reads
+Every verdict reads the recorded trajectory of the object and the robot. The configured schedule
+(`frames_per_waypoint`) and each row's waypoint and phase are read only where the generator's own
+judge reads them: whether a phase recorded every row it was scheduled for (which separates C's
+`never_crossed` from `incomplete` and decides whether the put-down is judged), the attempt a retry
+ended in, the length of the put-back's hold and the decidable windows. The same rows can therefore
+score differently under two schedules. The schedule is part of each episode's metadata, so the
+published table can be recomputed from the dataset alone, on a CPU. The scorer reads
 `metadata.yaml` and each episode's trajectory file with its footer metadata; it never reads the
 frames file or the videos.
 
@@ -347,13 +352,13 @@ and `status`. Under `tasks`, each task has its `criterion_id`, `placed_rule` (`p
 or null), `n_object_types`, `population`, `overall` and `by_object_type`; each table holds `n` and,
 for C and B, the three stages (`planned`, `undecidable`, `true`, `false`, `not_reached`,
 `of_attempted`, `of_all` and the two intervals), `task_score`, `task_score_why_null`, `headline` and
-`failures` (`counts`, `of_all`, `reasons`). Each line of the episodes file is one episode in the
-listing's order: its verdicts, class and words per criterion, C's agreement record, B's crossing and
-window end, the placement verdict with its facts, and its check, or for a refused episode its rule
-and why.
+`failures` (`counts`, `of_all`, `reasons`). Each line of the episodes file is one episode, ordered
+by object type, then episode uid: its verdicts, class and words per criterion, C's agreement record,
+B's crossing and window end, the placement verdict with its facts, and its check, or for a refused
+episode its rule and why.
 
-The output is deterministic: no randomness, the listing's order, and numbers written as the
-shortest float64 strings that read back exactly.
+The output is deterministic: no randomness, episodes ordered by object type, then episode uid, and
+numbers written as the shortest float64 strings that read back exactly.
 
 ## The check against the verdicts each episode carries
 
