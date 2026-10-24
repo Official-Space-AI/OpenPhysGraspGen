@@ -222,6 +222,7 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
     format this scorer reads.
     """
     import pyarrow as pa
+    import pyarrow.parquet as pq
     import yaml
 
     from ..dataset import episode_metadata, read_metadata, read_trajectory
@@ -252,7 +253,9 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
                 )
             try:
                 meta = episode_metadata(path)
-                columns = read_trajectory(path, COLUMNS)
+                # score_episode refuses a trajectory that lacks a column, naming it.
+                names = set(pq.read_schema(path).names)
+                columns = read_trajectory(path, [c for c in COLUMNS if c in names])
             except (OSError, ValueError, KeyError, pa.ArrowException) as exc:
                 raise Refused("unreadable", f"{entry.get('path')}: {exc}") from exc
             if not isinstance(meta, Mapping):

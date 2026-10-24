@@ -307,10 +307,13 @@ def task_block_problems(block: object, recorded_fps: object = None) -> list[str]
     judge = key("judge", lambda v: isinstance(v, Mapping), "must be a mapping")
     if judge is not _MISSING:
 
-        def number(k: str, required: bool = True) -> Any:
-            return get(
-                judge, "judge.", k, _positive, "must be a finite number > 0", required
-            )
+        def typed(k: str, ok: Callable[[Any], bool], rule: str, needed: bool) -> Any:
+            # A key the task does not need may be absent or null, else it has its type.
+            check = ok if needed else lambda v: v is None or ok(v)
+            return get(judge, "judge.", k, check, rule, needed)
+
+        def number(k: str, needed: bool = True) -> Any:
+            return typed(k, _positive, "must be a finite number > 0", needed)
 
         lift = number("lift_success_m")
         get(
@@ -320,17 +323,17 @@ def task_block_problems(block: object, recorded_fps: object = None) -> list[str]
             lambda v: _positive(v) and (lift is _MISSING or v > lift),
             "must be a finite number above lift_success_m",
         )
-        if task is not None and "place" in task.phases:
-            for k in PLACE_KEYS:
-                number(k)
-        if task is not None and task.carries:
-            for k in CARRY_KEYS:
-                number(k)
-            for k in CARRY_COUNTS:
-                get(judge, "judge.", k, _count, "must be an int >= 1")
-        if task is not None and task.centroid_bound:
-            number("place_error_tol_m")
-        elif task is not None:
+        places = task is not None and "place" in task.phases
+        carries = task is not None and task.carries
+        for k in PLACE_KEYS:
+            number(k, places)
+        for k in CARRY_KEYS:
+            number(k, carries)
+        for k in CARRY_COUNTS:
+            typed(k, _count, "must be an int >= 1", carries)
+        if task is None or task.centroid_bound:
+            number("place_error_tol_m", task is not None)
+        else:
             get(
                 judge,
                 "judge.",

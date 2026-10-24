@@ -18,6 +18,7 @@ import pytest
 pytest.importorskip("pyarrow")
 pytest.importorskip("yaml")
 
+import pyarrow.parquet as pq
 import yaml
 
 from openphysgraspgen.benchmark import (
@@ -1092,6 +1093,23 @@ def test_the_task_block_check_names_every_problem():
 
 
 @pytest.mark.parametrize(
+    ("key", "value", "rule"),
+    [
+        ("place_tol_m", "2 cm", "must be a finite number > 0"),
+        ("carry_slip_tol_m", [0.02], "must be a finite number > 0"),
+        ("open_ramp_frames", 1.5, "must be an int >= 1"),
+    ],
+)
+def test_a_judge_key_the_task_does_not_need_still_has_its_type(key, value, rule):
+    rows = ramp("lift_hold", LH, 0.15)
+    with pytest.raises(Refused) as refused:
+        score(rows, block("lift_hold", LH, judge={key: value}))
+    assert refused.value.word == "task_block"
+    assert refused.value.detail == f"judge.{key}: {rule}, got {value!r}"
+    assert score(rows, block("lift_hold", LH, judge={key: None}))["B"]["held"] is True
+
+
+@pytest.mark.parametrize(
     ("extra", "problem"),
     [
         ({"floor_arm": "no_vision_pick"}, "floor_arm"),
@@ -1147,6 +1165,19 @@ def test_refused_and_unlisted_episodes_make_the_run_incomplete(tmp_path):
     assert records["ep-1"]["refused"] == "task_block"
     assert "layout: missing" in records["ep-1"]["detail"]
     assert report["tasks"]["lift_hold"]["overall"]["n"] == 1
+
+
+def test_a_trajectory_without_a_column_the_scorer_reads_is_refused(tmp_path):
+    write(
+        tmp_path, [episode("ep-0", ramp("lift_hold", LH, 0.15), block("lift_hold", LH))]
+    )
+    path = tmp_path / "trajectories" / "apple" / "ep-0.parquet"
+    footer = {b"physgraspgen": pq.read_metadata(path).metadata[b"physgraspgen"]}
+    table = pq.read_table(path).drop_columns(["force.ground_force_mag"])
+    pq.write_table(table.replace_schema_metadata(footer), path)
+    _, records = scored(tmp_path)
+    assert records["ep-0"]["refused"] == "columns"
+    assert records["ep-0"]["detail"] == "the trajectory lacks force.ground_force_mag"
 
 
 def test_the_listing_must_describe_the_file(tmp_path):

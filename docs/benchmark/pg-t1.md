@@ -96,7 +96,8 @@ key that is missing or malformed.
 | `n_retries` | int >= 0 or null | optional | recoveries flown (reported) |
 | `timing_scale` | mapping of phase to factor > 0, or null | optional | the per-episode timing factors of phases before the close (`search`, `approach`, `descend`); a block that scales a later phase is refused |
 
-The keys of `judge`:
+The keys of `judge`. A key that a task does not require may be absent or null; when it is given
+anyway, it must still have its type.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
