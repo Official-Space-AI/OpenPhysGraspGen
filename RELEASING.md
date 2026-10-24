@@ -11,9 +11,12 @@ Releases are cut by pushing a version tag. The `Release` workflow
 4. fails if the SBOMs miss the package or a dependency, or if a known vulnerability of
    severity high or above is found,
 5. publishes the sdist and wheel to PyPI as `openphysgraspgen`,
-6. attests the build provenance and the SBOM, and creates a GitHub release with the sdist,
-   wheel, both SBOMs and `SHA256SUMS` attached. Tags ending in `aN`, `bN` or `rcN` are marked
-   as pre-releases.
+6. builds the container image from the same wheel on the official Python image pinned in the
+   `Dockerfile`, generates its SBOM, fails if a known vulnerability of severity high or above
+   has a fix, pushes it to `ghcr.io/official-space-ai/openphysgraspgen` and attests it,
+7. attests the build provenance and the SBOM, and creates a GitHub release with the sdist,
+   wheel, the three SBOMs and `SHA256SUMS` attached. Tags ending in `aN`, `bN` or `rcN` are
+   marked as pre-releases.
 
 The PyPI project is `openphysgraspgen`, the repository's name. It is not `physgraspgen`,
 because that is the import name of the project's internal solver package (#28).
@@ -31,12 +34,13 @@ because that is the import name of the project's internal solver package (#28).
    ```
 
 3. Approve the `pypi` environment deployment when the run asks for it, and check that the
-   release page has the five assets.
+   release page has the six assets and that the image is in the registry.
 
 ## Verifying a release
 
 ```sh
 gh attestation verify openphysgraspgen-1.0.0rc1-py3-none-any.whl --repo Official-Space-AI/OpenPhysGraspGen
+gh attestation verify oci://ghcr.io/official-space-ai/openphysgraspgen:1.0.0rc1 --repo Official-Space-AI/OpenPhysGraspGen
 ```
 
 ## Keeping the workflow current
@@ -46,6 +50,13 @@ Dependabot (`.github/dependabot.yml`) opens a pull request each week when an act
 Python dependency has a new release; review it like any other change.
 `pypa/gh-action-pypi-publish` must stay at v1.14.3 or later (GHSA-5xjx-3w67-w9x9).
 
+The container's base image is pinned by digest in the `BASE_IMAGE` argument of the
+`Dockerfile` and used unmodified. When the release's image scan finds a fixable
+vulnerability, or before a release when the digest is old, replace the digest with the
+current one of `python:3.12-slim-trixie` in a pull request. The image keeps the base image's
+name and digest in its labels and in `/usr/share/doc/openphysgraspgen/NOTICE.container`,
+which also says where to get the source of its Debian packages.
+
 ## One-time setup
 
 - On PyPI, add a trusted publisher for the project `openphysgraspgen`: owner
@@ -54,3 +65,5 @@ Python dependency has a new release; review it like any other change.
   publishing settings.
 - The repository has an environment `pypi` that only `v*` tags can deploy to, with a required
   reviewer, so every upload waits for a maintainer's approval.
+- After the first image is pushed, make the `openphysgraspgen` container package public in the
+  organization's package settings and link it to this repository.

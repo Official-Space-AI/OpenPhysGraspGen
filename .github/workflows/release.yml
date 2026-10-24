@@ -1,8 +1,9 @@
 name: Release
 
 # Pushing a version tag (v1.0.0rc1, v1.0.0, ...) builds the sdist and wheel, describes
-# them in SPDX and CycloneDX SBOMs, publishes them to PyPI and attaches everything to a
-# GitHub release. Steps for maintainers are in RELEASING.md.
+# them in SPDX and CycloneDX SBOMs, publishes them to PyPI, builds the container image from
+# the same wheel and publishes it to the GitHub Container Registry, and attaches everything
+# to a GitHub release. Steps for maintainers are in RELEASING.md.
 #
 # Third-party actions are pinned to full commit SHAs, with the release tag in a comment;
 # Dependabot (.github/dependabot.yml) proposes updates.
@@ -90,8 +91,68 @@ jobs:
       # v1.14.3 or later is required (GHSA-5xjx-3w67-w9x9).
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
-  github-release:
+  docker:
     needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - name: Build the image from the released wheel
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/openphysgraspgen"
+          tag="${GITHUB_REF_NAME#v}"
+          docker build --tag "$image:$tag" .
+          docker run --rm "$image:$tag" --fracture-threshold 0.25 --confidence-threshold 0.5 > /dev/null
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+      # The image SBOM lists every package in the image, the base image's Debian packages
+      # included, with its license, as the policy for container base images requires.
+      - name: Generate the image SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3 (Syft v1.54.0)
+        with:
+          image: ${{ env.IMAGE }}:${{ env.TAG }}
+          format: spdx-json
+          output-file: sbom/openphysgraspgen-image-${{ github.ref_name }}.spdx.json
+          upload-artifact: false
+      # Fails on a known vulnerability of severity high or above that has a fix, which means
+      # the pinned base image is out of date (see RELEASING.md).
+      - name: Scan the image SBOM for fixable vulnerabilities
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2 (Grype v0.118.0)
+        with:
+          sbom: sbom/openphysgraspgen-image-${{ github.ref_name }}.spdx.json
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+      - name: Push the image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$TAG"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$TAG")
+          echo "DIGEST=${digest#*@}" >> "$GITHUB_ENV"
+      - name: Attest the image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          push-to-registry: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-sbom
+          path: sbom/
+
+  github-release:
+    needs: [pypi, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -101,6 +162,10 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-sbom
+          path: sbom/
       - run: sha256sum dist/* > SHA256SUMS
       - name: Attest build provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
