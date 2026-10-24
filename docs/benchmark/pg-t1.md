@@ -69,7 +69,7 @@ where it was, not where it was sent.
 
 From the footer: `format` and `format_version`, `episode_uid` and `object_type` (which must match
 the episode's entry in `metadata.yaml`), `recorded_fps`, `n_steps`, `source_n_frames`, `label`
-(reported, never judged) and `task`.
+(`success`, `fracture`, `fail` or `unknown`; reported, never judged) and `task`.
 
 ### The task block
 
@@ -144,9 +144,10 @@ An episode that breaks one of these rules is refused: it is not scored, its rule
 
 | Word | Rule |
 |---|---|
-| `listing` | the file holds the episode and object type `metadata.yaml` lists for it, under the dataset's root |
+| `listing` | `metadata.yaml` lists the episode's uid and object type as strings and its path under the dataset's root, and the file holds that episode of that object type |
 | `unreadable` | the trajectory file and its footer can be read |
 | `format` | the footer says `physgraspgen-public` 2.0 |
+| `label` | the footer's `label` is `success`, `fracture`, `fail` or `unknown` |
 | `recorded_fps` | `recorded_fps` is an int >= 1 |
 | `columns` | the trajectory has every column above |
 | `rows` | the rows are steps 1, 2, ..., n: the first row is the first recorded frame |
@@ -336,15 +337,16 @@ reached", never as 0. Floor-arm baselines are scored the same way and reported a
 
 The JSON report holds `benchmark`, `scorer` (`id`, `version`), `dataset`, `criteria`, `episodes`
 (`listed`, `scored`, `refused`, `refusals`, `refused_episodes` with each refused episode's
-`episode_uid`, `object_type`, rule (`refused`) and why (`detail`), `unlisted`, `unlisted_paths`),
-`tasks`, `floor_arms`, `check` and `status`. Under `tasks`, each task has its `criterion_id`,
-`placed_rule` (`put-back`, `put-down` or null), `n_object_types`, `population`, `overall` and
-`by_object_type`; each table holds `n` and, for C and B, the three stages (`planned`, `undecidable`,
-`true`, `false`, `not_reached`, `of_attempted`, `of_all` and the two intervals), `task_score`,
-`task_score_why_null`, `headline` and `failures` (`counts`, `of_all`, `reasons`). Each line of the
-episodes file is one episode in the listing's order: its verdicts, class and words per criterion,
-C's agreement record, B's crossing and window end, the placement verdict with its facts, and its
-check, or for a refused episode its rule and why.
+`episode_uid` and `object_type` as `metadata.yaml` lists them (as text where they are not strings),
+rule (`refused`) and why (`detail`), `unlisted`, `unlisted_paths`), `tasks`, `floor_arms`, `check`
+and `status`. Under `tasks`, each task has its `criterion_id`, `placed_rule` (`put-back`, `put-down`
+or null), `n_object_types`, `population`, `overall` and `by_object_type`; each table holds `n` and,
+for C and B, the three stages (`planned`, `undecidable`, `true`, `false`, `not_reached`,
+`of_attempted`, `of_all` and the two intervals), `task_score`, `task_score_why_null`, `headline` and
+`failures` (`counts`, `of_all`, `reasons`). Each line of the episodes file is one episode in the
+listing's order: its verdicts, class and words per criterion, C's agreement record, B's crossing and
+window end, the placement verdict with its facts, and its check, or for a refused episode its rule
+and why.
 
 The output is deterministic: no randomness, the listing's order, and numbers written as the
 shortest float64 strings that read back exactly.

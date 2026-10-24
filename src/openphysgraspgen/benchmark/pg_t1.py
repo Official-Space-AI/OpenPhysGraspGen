@@ -627,6 +627,11 @@ def read_episode(
             f"{meta.get('object_type')}, metadata.yaml lists "
             f"{listing.get('episode_uid')} of {listing.get('object_type')}",
         )
+    label = meta.get("label")
+    if not (isinstance(label, str) and label in LABELS):
+        raise Refused(
+            "label", f"label must be one of {', '.join(LABELS)}, got {label!r}"
+        )
     fps = meta.get("recorded_fps")
     if not _count(fps):
         raise Refused("recorded_fps", f"recorded_fps must be an int >= 1, got {fps!r}")

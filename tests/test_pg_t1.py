@@ -7,6 +7,7 @@ GraspDataRecorder, read back through the dataset reader and scored as the comman
 them; the edge cases are scored from columns in memory by the same function.
 """
 
+import datetime
 import json
 import math
 import subprocess
@@ -1257,6 +1258,8 @@ def test_a_carry_task_without_its_mat_is_refused():
     ("change", "word"),
     [
         ({"format_version": "1.0"}, "format"),
+        ({"label": "lost"}, "label"),
+        ({"label": ["success"]}, "label"),
         ({"recorded_fps": True}, "recorded_fps"),
         ({"n_steps": 10}, "n_steps"),
         ({"source_n_frames": None}, "trajectory_cut"),
@@ -1403,6 +1406,11 @@ def test_a_trajectory_without_a_column_the_scorer_reads_is_refused(tmp_path):
     assert records["ep-0"]["detail"] == "the trajectory lacks force.ground_force_mag"
 
 
+def lift_holds(n):
+    rows = ramp("lift_hold", LH, 0.15)
+    return [episode(f"ep-{k}", rows, block("lift_hold", LH)) for k in range(n)]
+
+
 def test_the_listing_must_describe_the_file(tmp_path):
     write(
         tmp_path,
@@ -1425,6 +1433,46 @@ def test_the_listing_must_describe_the_file(tmp_path):
         "unreadable",
         "listing",
     ]
+
+
+def edit_footer(path, **changes):
+    """Rewrite a trajectory file with these changes to its footer metadata."""
+    meta = json.loads(pq.read_metadata(path).metadata[b"physgraspgen"])
+    meta.update(changes)
+    footer = {b"physgraspgen": json.dumps(meta).encode()}
+    pq.write_table(pq.read_table(path).replace_schema_metadata(footer), path)
+
+
+def test_a_malformed_label_or_listing_refuses_its_episode_alone(tmp_path):
+    root = tmp_path / "d"
+    write(root, lift_holds(5))
+    trajectory = root / "trajectories" / "apple"
+    edit_footer(trajectory / "ep-0.parquet", label=["success"])
+    edit_footer(trajectory / "ep-4.parquet", object_type=["apple"])
+    path = root / "metadata.yaml"
+    meta = yaml.safe_load(path.read_text())
+    trajectories = [f for f in meta["files"] if f["kind"] == "trajectory"]
+    trajectories[1]["episode_uid"] = ["ep-1"]
+    # Written unquoted, a date reads back from YAML as a date, not a string.
+    trajectories[2]["episode_uid"] = meta["version"] = datetime.date(2026, 10, 25)
+    trajectories[4]["object_type"] = ["apple"]
+    path.write_text(yaml.safe_dump(meta))
+    report, episodes = score_dataset(root)
+    assert [
+        (e["object_type"], e["episode_uid"], e.get("refused")) for e in episodes
+    ] == [
+        ("['apple']", "ep-4", "listing"),
+        ("apple", "2026-10-25", "listing"),
+        ("apple", "['ep-1']", "listing"),
+        ("apple", "ep-0", "label"),
+        ("apple", "ep-3", None),
+    ]
+    assert episodes[3]["detail"] == (
+        "label must be one of success, fracture, fail, unknown, got ['success']"
+    )
+    assert report["dataset"]["version"] == "2026-10-25"
+    assert report["status"] == "incomplete"
+    assert run("pg-t1", root, "--json", tmp_path / "r.json") == 1
 
 
 def test_a_dataset_without_metadata_cannot_be_scored(tmp_path):

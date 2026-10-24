@@ -215,6 +215,11 @@ def _listed(root: Path, metadata: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     )
 
 
+def _text(value: object) -> str | None:
+    """A name from metadata.yaml as the report holds it: a string, or null."""
+    return value if value is None or isinstance(value, str) else str(value)
+
+
 def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Score every listed episode of a dataset: (the report, one record per episode).
 
@@ -243,10 +248,18 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
     entries = _listed(root, metadata)
     records: list[dict[str, Any]] = []
     refused: list[dict[str, Any]] = []
+    episodes: list[dict[str, Any]] = []
     for entry in entries:
+        uid, object_type = entry.get("episode_uid"), entry.get("object_type")
         rel = PurePosixPath(str(entry.get("path")))
         path = root / rel
         try:
+            if not (isinstance(uid, str) and isinstance(object_type, str)):
+                raise Refused(
+                    "listing",
+                    f"metadata.yaml lists episode_uid {uid!r} and object_type "
+                    f"{object_type!r}; both must be strings",
+                )
             if rel.is_absolute() or ".." in rel.parts:
                 raise Refused(
                     "listing", f"{entry.get('path')!r} is not a path under the root"
@@ -262,16 +275,17 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
                 raise Refused(
                     "unreadable", f"{entry.get('path')}: the footer is no mapping"
                 )
-            records.append(score_episode(columns, meta, entry))
+            record = score_episode(columns, meta, entry)
+            records.append(record)
         except Refused as exc:
-            refused.append(
-                {
-                    "episode_uid": entry.get("episode_uid"),
-                    "object_type": entry.get("object_type"),
-                    "refused": exc.word,
-                    "detail": exc.detail,
-                }
-            )
+            record = {
+                "episode_uid": _text(uid),
+                "object_type": _text(object_type),
+                "refused": exc.word,
+                "detail": exc.detail,
+            }
+            refused.append(record)
+        episodes.append(record)
     listed = {str(e.get("path")) for e in entries}
     on_disk = sorted(
         p.relative_to(root).as_posix()
@@ -295,8 +309,8 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
         "benchmark": "PG-T1",
         "scorer": {"id": SCORER_ID, "version": _version()},
         "dataset": {
-            "name": metadata.get("name"),
-            "version": metadata.get("version"),
+            "name": _text(metadata.get("name")),
+            "version": _text(metadata.get("version")),
             "format": FORMAT,
             "format_version": FORMAT_VERSION,
             "root": str(root),
@@ -332,13 +346,6 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
         "check": check,
         "status": status,
     }
-    order = {
-        (e.get("object_type"), e.get("episode_uid")): i for i, e in enumerate(entries)
-    }
-    episodes = sorted(
-        [*records, *refused],
-        key=lambda r: order.get((r["object_type"], r["episode_uid"]), len(order)),
-    )
     return report, episodes
 
 
