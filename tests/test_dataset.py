@@ -3,9 +3,11 @@
 import copy
 import hashlib
 import json
+import re
 import shutil
 import struct
 import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -21,6 +23,7 @@ from physgraspgen.dataset import (
     DatasetError,
     DatasetSpec,
     GraspDataRecorder,
+    VideoSpec,
     card_front_matter,
     episode_metadata,
     read_frames,
@@ -30,6 +33,7 @@ from physgraspgen.dataset import (
     video_tracks,
 )
 from physgraspgen.dataset import check_dataset as fmt
+from physgraspgen.dataset import video as video_module
 
 # A non-square image, so that a swapped width and height cannot pass.
 H, W = 64, 96
@@ -61,6 +65,7 @@ PALETTE = np.array(
 # Contacts per frame: with two frames per row group, the first group holds none.
 CONTACTS = (0, 0, 1, 2, 0, 3)
 DROP = object()
+POSIX = pytest.mark.skipif(sys.platform == "win32", reason="uses a shell script")
 
 
 def _has_av1():
@@ -329,7 +334,7 @@ def test_an_episode_reads_back_as_written(tmp_path):
     assert meta["format_version"] == fmt.FORMAT_VERSION
     assert (meta["n_frames"], meta["n_steps"], meta["n_tets"]) == (5, 10, T)
     assert (meta["facts"], meta["task"]) == (FACTS, TASK)
-    assert meta["video"] is None
+    assert (meta["video"], meta["ffmpeg_version"]) == (None, None)
     assert episode_metadata(files.trajectory) == meta
 
     schema = pq.read_schema(files.frames)
@@ -713,6 +718,22 @@ def test_a_dataset_spec_is_checked(change, message):
         DatasetSpec(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"encoder": ""}, "encoder must be a nonempty string"),
+        ({"crf": 0}, "crf must be between 1 and 63"),
+        ({"crf": 64}, "crf must be between 1 and 63"),
+        ({"gop": 1}, "gop must be at least 2"),
+        ({"preset": -1}, "preset must be between 0 and 11"),
+        ({"preset": 12}, "preset must be between 0 and 11"),
+    ],
+)
+def test_video_settings_are_ones_the_encoder_applies(change, message):
+    with pytest.raises(ValueError, match=message):
+        VideoSpec(**change)
+
+
 def test_a_failed_episode_leaves_nothing(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     with (
@@ -1066,41 +1087,35 @@ def test_finalize_refuses_a_doi_or_url_of_another_form(tmp_path, doi, url, messa
 # --- video ----------------------------------------------------------------------
 
 
-@needs_av1
-def test_rgb_is_written_as_av1_video(tmp_path):
-    recorder = GraspDataRecorder(tmp_path, make_spec(channels=fmt.CHANNELS))
-    frames = write_episode(recorder, n_frames=4)
-    files = recorder.files("apple", "ep-0")
-    for camera, path in files.videos.items():
-        (track,) = video_tracks(path)
-        assert (track.n_frames, track.fps) == (4, 30)
-        decoded = read_video(path, (H, W))
-        assert decoded.shape == (4, H, W, 3)
-        error = np.abs(
-            decoded.astype(int) - frames[2][f"rgb.{camera}.image"].astype(int)
-        )
-        assert error.mean() < 128
-    data = read_frames(
-        files.frames, columns=["rgb.front.video_frame", "rgb.front.sim_step"]
-    )
-    assert data["rgb.front.video_frame"].tolist() == [0, 1, 2, 3]
-    metadata = recorder.finalize()
-    assert metadata["video"]["codec"] == "av1"
-    assert sum(f["kind"] == "video" for f in metadata["files"]) == 2
-
-
 def _box(kind, payload):
     return struct.pack(">I4s", 8 + len(payload), kind) + payload
 
 
-def minimal_mp4(n_frames, timescale=15360, delta=512, fragmented=False):
+def sample_entry(codec=b"av01", width=W, height=H, flags=0x0C):
+    """A visual sample entry; flags is the third byte of av1C (0x0C: 8-bit 4:2:0)."""
+    body = (
+        bytes(6)
+        + struct.pack(">H", 1)
+        + bytes(16)
+        + struct.pack(">HHII", width, height, 0x00480000, 0x00480000)
+        + bytes(4)
+        + struct.pack(">H", 1)
+        + bytes(32)
+        + struct.pack(">Hh", 0x18, -1)
+    )
+    child = _box(b"av1C", bytes([0x81, 0x00, flags, 0x00])) if codec == b"av01" else b""
+    return _box(codec, body + child)
+
+
+def minimal_mp4(n_frames, timescale=15360, delta=512, fragmented=False, entry=None):
     mdhd = _box(b"mdhd", bytes(4) + struct.pack(">III", 0, 0, timescale) + bytes(8))
     hdlr = _box(b"hdlr", bytes(8) + b"vide" + bytes(12) + b"\0")
+    stsd = _box(b"stsd", bytes(4) + struct.pack(">I", 1) + (entry or sample_entry()))
     stsz = _box(
         b"stsz", bytes(4) + struct.pack(">II", 0, n_frames) + bytes(4 * n_frames)
     )
     stts = _box(b"stts", bytes(4) + struct.pack(">III", 1, n_frames, delta))
-    stbl = _box(b"stbl", stts + stsz)
+    stbl = _box(b"stbl", stsd + stts + stsz)
     trak = _box(b"trak", _box(b"mdia", mdhd + hdlr + _box(b"minf", stbl)))
     body = _box(b"ftyp", b"isom" + bytes(4)) + _box(b"moov", trak)
     if fragmented:
@@ -1113,6 +1128,9 @@ def test_video_frames_are_counted_from_the_index(tmp_path):
     path.write_bytes(minimal_mp4(450))
     (track,) = video_tracks(path)
     assert (track.n_frames, track.fps) == (450, 30)
+    assert (track.codec, track.width, track.height) == ("av01", W, H)
+    assert (track.bit_depth, track.chroma) == (8, "4:2:0")
+    assert fmt.video_error(track, (H, W), 30, 450) is None
 
     path.write_bytes(minimal_mp4(450, fragmented=True))
     with pytest.raises(ValueError, match="fragmented"):
@@ -1121,3 +1139,219 @@ def test_video_frames_are_counted_from_the_index(tmp_path):
     path.write_bytes(minimal_mp4(450)[:-8])
     with pytest.raises(ValueError, match="past the end"):
         video_tracks(path)
+
+
+@pytest.mark.parametrize(
+    ("mp4", "message"),
+    [
+        (
+            minimal_mp4(4, entry=sample_entry(b"avc1")),
+            r"is coded as avc1, not AV1 \(av01\)",
+        ),
+        (minimal_mp4(4, entry=sample_entry(flags=0x4C)), "is 10-bit 4:2:0, not 8-bit"),
+        (minimal_mp4(4, entry=sample_entry(flags=0x00)), "is 8-bit 4:4:4, not 8-bit"),
+        (minimal_mp4(4, entry=sample_entry(flags=0x1C)), "is 8-bit 4:0:0, not 8-bit"),
+        (
+            minimal_mp4(4, entry=sample_entry(width=H, height=W)),
+            "is 96 x 64 pixels, not the camera's 64 x 96",
+        ),
+        (minimal_mp4(4, delta=1024), "does not run at a constant 30 fps"),
+        (minimal_mp4(5), "holds 5 frames, not 4"),
+    ],
+)
+def test_a_video_that_is_not_the_cameras_is_found_from_its_index(
+    tmp_path, mp4, message
+):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(mp4)
+    (track,) = video_tracks(path)
+    assert re.match(message, fmt.video_error(track, (H, W), 30, 4))
+
+
+def _fake_ffmpeg(directory, script):
+    path = directory / "ffmpeg"
+    path.write_text(f"#!/bin/sh\n{script}\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+@POSIX
+@pytest.mark.parametrize(
+    ("script", "message"),
+    [
+        ("head -c 100 /dev/zero", "decoded to 0 frames, its index has 4"),
+        ("head -c 80000 /dev/zero", "decoded to more frames than the 4 of its index"),
+        ("echo 'no AV1 decoder' >&2; exit 3", r"\(exit 3\): no AV1 decoder"),
+    ],
+)
+def test_read_video_checks_what_ffmpeg_decodes(tmp_path, script, message):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(minimal_mp4(4))
+    ffmpeg = _fake_ffmpeg(tmp_path, script)
+    with pytest.raises(RuntimeError, match=message):
+        read_video(path, (H, W), ffmpeg)
+
+
+def test_read_video_checks_the_size_and_count_and_names_the_decoder(tmp_path):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(minimal_mp4(4))
+    with pytest.raises(ValueError, match="is 64 x 96 pixels, not 96 x 64"):
+        read_video(path, (W, H))
+    with pytest.raises(ValueError, match="holds 4 frames, not 5"):
+        read_video(path, n_frames=5)
+    with pytest.raises(
+        RuntimeError, match="reading RGB needs an ffmpeg .* AV1 decoder"
+    ):
+        read_video(path, ffmpeg=str(tmp_path / "no-ffmpeg"))
+
+
+@POSIX
+@pytest.mark.parametrize(
+    ("listing", "message"),
+    [
+        (" V....D libx264  libx264 H.264 (codec h264)", "has no libsvtav1 encoder"),
+        (" V..... libsvtav1  something else (codec h264)", "not an AV1 encoder"),
+    ],
+)
+def test_the_recorder_checks_that_ffmpeg_has_the_encoder(tmp_path, listing, message):
+    ffmpeg = _fake_ffmpeg(
+        tmp_path, f"printf 'Encoders:\\n V..... = Video\\n ------\\n{listing}\\n'"
+    )
+    with pytest.raises(RuntimeError, match=message):
+        GraspDataRecorder(tmp_path / "root", make_spec(fmt.CHANNELS), ffmpeg=ffmpeg)
+
+
+@needs_av1
+def test_rgb_is_written_as_av1_video(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec(channels=fmt.CHANNELS))
+    frames = write_episode(recorder, n_frames=4)
+    files = recorder.files("apple", "ep-0")
+    sources = np.array(
+        [[colour(f["sim_step"], c) for c in fmt.CAMERAS] for f in frames], dtype=float
+    )
+    for c, camera in enumerate(fmt.CAMERAS):
+        (track,) = video_tracks(files.videos[camera])
+        assert (track.codec, track.width, track.height) == ("av01", W, H)
+        assert (track.bit_depth, track.chroma) == (8, "4:2:0")
+        assert (track.n_frames, track.fps) == (4, 30)
+        decoded = read_video(files.videos[camera], (H, W), n_frames=4)
+        assert decoded.shape == (4, H, W, 3)
+        assert decoded.flags.writeable
+        # Each frame is the solid colour of its own frame and camera, to AV1's loss.
+        means = decoded.reshape(4, -1, 3).mean(axis=1)
+        for i, mean in enumerate(means):
+            distance = np.abs(sources - mean).max(axis=-1)
+            assert np.unravel_index(distance.argmin(), distance.shape) == (i, c)
+            assert distance[i, c] < 8
+    data = read_frames(
+        files.frames, columns=["rgb.front.video_frame", "rgb.front.sim_step"]
+    )
+    assert data["rgb.front.video_frame"].tolist() == [0, 1, 2, 3]
+    assert data["rgb.front.sim_step"].tolist() == [2, 4, 6, 8]
+    meta = episode_metadata(files.frames)
+    assert meta["video"] == VideoSpec().record()
+    assert meta["ffmpeg_version"] == video_module.ffmpeg_version(shutil.which("ffmpeg"))
+
+    metadata = recorder.finalize()
+    assert metadata["video"] == {
+        **VideoSpec().record(),
+        "ffmpeg_versions": [meta["ffmpeg_version"]],
+    }
+    assert sum(f["kind"] == "video" for f in metadata["files"]) == 2
+    assert metadata["counts"]["n_files"] == 4
+
+
+@needs_av1
+def test_an_rgb_image_of_another_size_is_refused(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec(channels=fmt.CHANNELS))
+    with open_episode(recorder) as episode:
+        frame = make_frame(2, recorder.spec)
+        frame["rgb.front.image"] = np.zeros((W, H, 3), dtype=np.uint8)
+        with pytest.raises(ValueError, match=r"rgb.front.image must be \(64, 96, 3\)"):
+            episode.add_frame(frame)
+        episode.abort()
+    assert files_under(tmp_path) == []
+
+
+@needs_av1
+def test_read_video_refuses_a_damaged_video(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec(channels=fmt.CHANNELS))
+    write_episode(recorder, n_frames=4)
+    path = recorder.files("apple", "ep-0").videos["front"]
+    data = bytearray(path.read_bytes())
+    # Inverting the first OBU header sets its forbidden bit.
+    start = data.find(b"mdat") + 4
+    data[start : start + 16] = bytes(b ^ 0xFF for b in data[start : start + 16])
+    path.write_bytes(bytes(data))
+    with pytest.raises(RuntimeError, match="could not decode"):
+        read_video(path, (H, W))
+
+
+@needs_av1
+@pytest.mark.parametrize(
+    ("mp4", "message"),
+    [
+        (minimal_mp4(4, entry=sample_entry(b"avc1")), "is coded as avc1"),
+        (
+            minimal_mp4(4, entry=sample_entry(width=64, height=64)),
+            "is 64 x 64 pixels, not the camera's 64 x 96",
+        ),
+        (minimal_mp4(3), "holds 3 frames, not 4"),
+    ],
+)
+def test_finalize_refuses_a_video_that_is_not_the_cameras(tmp_path, mp4, message):
+    recorder = GraspDataRecorder(tmp_path, make_spec(channels=fmt.CHANNELS))
+    write_episode(recorder, n_frames=4)
+    recorder.files("apple", "ep-0").videos["wrist"].write_bytes(mp4)
+    with pytest.raises(DatasetError, match=f"videos/wrist/apple/ep-0.mp4: {message}"):
+        recorder.finalize()
+
+
+@needs_av1
+@POSIX
+def test_episodes_from_two_ffmpeg_builds_share_one_video_record(tmp_path):
+    spec = make_spec(channels=fmt.CHANNELS)
+    first = GraspDataRecorder(tmp_path / "root", spec)
+    write_episode(first, uid="ep-0", n_frames=2)
+    real = shutil.which("ffmpeg")
+    other = _fake_ffmpeg(
+        tmp_path,
+        'if [ "$2" = "-version" ]; then echo "ffmpeg version 0.0-test"; exit 0; fi\n'
+        f'exec "{real}" "$@"',
+    )
+    second = GraspDataRecorder(tmp_path / "root", spec, ffmpeg=other)
+    write_episode(second, uid="ep-1", object_type="banana", n_frames=2)
+    metadata = first.finalize()
+    assert metadata["video"]["ffmpeg_versions"] == sorted(
+        ["ffmpeg version 0.0-test", video_module.ffmpeg_version(real)]
+    )
+
+    third = GraspDataRecorder(
+        tmp_path / "root", make_spec(fmt.CHANNELS, video=VideoSpec(crf=40))
+    )
+    write_episode(third, uid="ep-2", object_type="cherry", n_frames=2)
+    with pytest.raises(DatasetError, match="episodes disagree on video"):
+        first.finalize()
+
+
+@needs_av1
+def test_an_encoder_that_fails_to_start_stops_those_started(tmp_path, monkeypatch):
+    recorder = GraspDataRecorder(tmp_path, make_spec(channels=fmt.CHANNELS))
+    started = []
+    popen = subprocess.Popen
+
+    def fail_the_second(*args, **kwargs):
+        if started:
+            raise OSError(24, "Too many open files")
+        started.append(popen(*args, **kwargs))
+        return started[-1]
+
+    monkeypatch.setattr(video_module.subprocess, "Popen", fail_the_second)
+    with (
+        pytest.raises(OSError, match="Too many open files"),
+        open_episode(recorder) as episode,
+    ):
+        episode.add_frame(make_frame(2, recorder.spec))
+    assert len(started) == 1
+    assert started[0].poll() is not None
+    assert files_under(tmp_path) == []

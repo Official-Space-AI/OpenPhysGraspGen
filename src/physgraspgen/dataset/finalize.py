@@ -25,7 +25,8 @@ class DatasetError(ValueError):
 # What reading a damaged or foreign file can raise.
 READ_ERRORS = (OSError, ValueError, struct.error, pa.ArrowException)
 
-# What every episode of a dataset must state alike.
+# What every episode of a dataset must state alike. video is the encoder settings; the
+# ffmpeg build that ran them may differ between episodes.
 SHARED_KEYS = (
     "format",
     "format_version",
@@ -146,8 +147,14 @@ def _check_file(path: Path, kind: str, meta: dict[str, Any], camera: str | None)
             )
         return rows
     tracks = fmt.video_tracks(path)
-    if len(tracks) != 1 or tracks[0].n_frames != meta["n_frames"]:
-        raise DatasetError("does not hold one video track of the episode's frames")
+    if len(tracks) != 1:
+        raise DatasetError(f"holds {len(tracks)} video tracks, not one")
+    size = meta["image_size"][camera]
+    problem = fmt.video_error(
+        tracks[0], (size["height"], size["width"]), meta["fps"], meta["n_frames"]
+    )
+    if problem:
+        raise DatasetError(problem)
     return tracks[0].n_frames
 
 
@@ -362,6 +369,10 @@ def finalize_dataset(
         entry["assets"].add(meta["object_asset"])
     for entry in object_types.values():
         entry["assets"] = sorted(entry["assets"])
+    video = first["video"]
+    if video is not None:
+        builds = {meta["ffmpeg_version"] for meta in episodes.values()}
+        video = {**video, "ffmpeg_versions": sorted(builds)}
     metadata = {
         "format": fmt.FORMAT,
         "format_version": fmt.FORMAT_VERSION,
@@ -376,7 +387,7 @@ def finalize_dataset(
         "channels": first["channels"],
         "cameras": first["cameras"],
         "image_size": first["image_size"],
-        "video": first["video"],
+        "video": video,
         "counts": {
             "n_frames": sum(m["n_frames"] for m in episodes.values()),
             "n_episodes": len(episodes),

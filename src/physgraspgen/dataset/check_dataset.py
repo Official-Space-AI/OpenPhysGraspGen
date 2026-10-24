@@ -64,6 +64,7 @@ EPISODE_KEYS = (
     "image_size",
     "segmentation_classes",
     "video",
+    "ffmpeg_version",
     "facts",
     "task",
     "header",
@@ -389,18 +390,66 @@ def facts_error(facts: object) -> str | None:
 
 # --- MP4 ------------------------------------------------------------------------------
 
+# The one video coding the format allows: AV1 in an av01 sample entry, 8-bit 4:2:0.
+VIDEO_CODEC = "av01"
+VIDEO_BIT_DEPTH = 8
+VIDEO_CHROMA = "4:2:0"
+# av1C's (chroma_subsampling_x, chroma_subsampling_y) by name.
+CHROMA_SUBSAMPLING = {
+    (1, 1): "4:2:0",
+    (1, 0): "4:2:2",
+    (0, 0): "4:4:4",
+    (0, 1): "4:4:0",
+}
+
 
 @dataclass(frozen=True)
 class VideoTrack:
     n_frames: int
     timescale: int
     frame_durations: tuple[int, ...]
+    codec: str
+    width: int
+    height: int
+    # From the av1C box of an av01 sample entry, None for other codecs.
+    bit_depth: int | None = None
+    chroma: str | None = None
 
     @property
     def fps(self) -> float | None:
         if len(self.frame_durations) != 1 or self.frame_durations[0] <= 0:
             return None
         return self.timescale / self.frame_durations[0]
+
+
+def video_error(
+    track: VideoTrack,
+    size: tuple[int, int],
+    fps: float,
+    n_frames: int | None = None,
+) -> str | None:
+    """Why a video track is not a camera's video in the format, or None.
+
+    size is the camera's (height, width), fps the dataset's frame rate.
+    """
+    if track.codec != VIDEO_CODEC:
+        return f"is coded as {track.codec}, not AV1 ({VIDEO_CODEC})"
+    if (track.bit_depth, track.chroma) != (VIDEO_BIT_DEPTH, VIDEO_CHROMA):
+        return (
+            f"is {track.bit_depth}-bit {track.chroma}, "
+            f"not {VIDEO_BIT_DEPTH}-bit {VIDEO_CHROMA}"
+        )
+    height, width = size
+    if (track.height, track.width) != (height, width):
+        return (
+            f"is {track.height} x {track.width} pixels, not the camera's "
+            f"{height} x {width}"
+        )
+    if track.fps is None or abs(track.fps - fps) > 1e-9 * fps:
+        return f"does not run at a constant {fps} fps"
+    if n_frames is not None and track.n_frames != n_frames:
+        return f"holds {track.n_frames} frames, not {n_frames}"
+    return None
 
 
 def _boxes(data: bytes, start: int, end: int):
@@ -462,6 +511,34 @@ def _read_moov(path: Path) -> bytes:
     return moov
 
 
+def _sample_entry(
+    moov: bytes, stsd: tuple[int, int]
+) -> tuple[str, int, int, int | None, str | None]:
+    """A video track's codec, width, height, bit depth and chroma subsampling."""
+    start, end = stsd
+    if start + 8 > end:
+        raise ValueError("truncated sample description")
+    (count,) = struct.unpack_from(">I", moov, start + 4)
+    if count != 1:
+        raise ValueError(f"a video track with {count} sample descriptions")
+    for kind, body, stop in _boxes(moov, start + 8, end):
+        # A visual sample entry holds 78 bytes before its own boxes.
+        if body + 78 > stop:
+            raise ValueError("truncated visual sample entry")
+        width, height = struct.unpack_from(">HH", moov, body + 24)
+        if kind != b"av01":
+            return kind.decode("latin-1"), width, height, None, None
+        av1c = _child(moov, body + 78, stop, b"av1C")
+        if av1c is None or av1c[0] + 3 > av1c[1]:
+            raise ValueError("an av01 sample entry without an av1C box")
+        bits = moov[av1c[0] + 2]
+        high, twelve, mono, sub_x, sub_y = (bits >> s & 1 for s in (6, 5, 4, 3, 2))
+        depth = (12 if twelve else 10) if high else 8
+        chroma = "4:0:0" if mono else CHROMA_SUBSAMPLING[sub_x, sub_y]
+        return "av01", width, height, depth, chroma
+    raise ValueError("a video track without a sample entry")
+
+
 def video_tracks(path: str | Path) -> list[VideoTrack]:
     """The video tracks of an MP4 file, read from its index without decoding."""
     moov = _read_moov(Path(path))
@@ -487,6 +564,10 @@ def video_tracks(path: str | Path) -> list[VideoTrack]:
         timescale = struct.unpack_from(
             ">I", moov, mdhd[0] + (20 if version == 1 else 12)
         )[0]
+        stsd = _child(moov, *stbl, b"stsd")
+        if stsd is None:
+            raise ValueError("a video track without a sample description")
+        codec, width, height, depth, chroma = _sample_entry(moov, stsd)
         stsz = _child(moov, *stbl, b"stsz")
         stz2 = _child(moov, *stbl, b"stz2")
         if stsz is not None:
@@ -510,5 +591,16 @@ def video_tracks(path: str | Path) -> list[VideoTrack]:
                 durations.append(delta)
         if counted != n_frames:
             raise ValueError("the time-to-sample table and the sample count disagree")
-        tracks.append(VideoTrack(n_frames, timescale, tuple(durations)))
+        tracks.append(
+            VideoTrack(
+                n_frames,
+                timescale,
+                tuple(durations),
+                codec,
+                width,
+                height,
+                depth,
+                chroma,
+            )
+        )
     return tracks

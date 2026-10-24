@@ -16,7 +16,7 @@ import pyarrow.parquet as pq
 
 from . import check_dataset as fmt
 from .finalize import finalize_dataset
-from .video import VideoEncoder, VideoSpec, ffmpeg_version, find_ffmpeg
+from .video import VideoEncoder, VideoSpec, check_encoder, ffmpeg_version, find_ffmpeg
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -341,12 +341,8 @@ class EpisodeWriter:
         self._frame_steps: list[int] = []
         self._writer: pq.ParquetWriter | None = None
         self._ffmpeg = ffmpeg
+        self._ffmpeg_version = ffmpeg_version
         self._encoders: dict[str, VideoEncoder] = {}
-        self._video = (
-            spec.video.record(ffmpeg_version or "unknown")
-            if self.files.videos
-            else None
-        )
         self._done = False
         self._claim = _claim(self.files, info["episode_uid"], overwrite)
         stat = os.fstat(self._claim.fileno())
@@ -467,19 +463,19 @@ class EpisodeWriter:
                 )
             images[camera] = image
 
-        if images and not self._encoders:
+        if images:
             if self._ffmpeg is None:
                 raise RuntimeError("writing RGB needs an ffmpeg executable")
-            self._encoders = {
-                camera: VideoEncoder(
-                    _part(path),
-                    self.spec.image_size[camera],
-                    self.spec.fps,
-                    self.spec.video,
-                    self._ffmpeg,
-                )
-                for camera, path in self.files.videos.items()
-            }
+            # One at a time, so that abort stops every encoder that has started.
+            for camera, path in self.files.videos.items():
+                if camera not in self._encoders:
+                    self._encoders[camera] = VideoEncoder(
+                        _part(path),
+                        self.spec.image_size[camera],
+                        self.spec.fps,
+                        self.spec.video,
+                        self._ffmpeg,
+                    )
         for camera, image in images.items():
             self._encoders[camera].write(image)
         for name, value in row.items():
@@ -619,6 +615,7 @@ class EpisodeWriter:
 
     def _metadata(self) -> dict[str, bytes]:
         info = dict(self.info)
+        video = self.spec.video.record() if self.files.videos else None
         info.update(
             {
                 "format": fmt.FORMAT,
@@ -640,7 +637,10 @@ class EpisodeWriter:
                 "segmentation_classes": list(fmt.SEGMENTATION_CLASSES)
                 if "segmentation" in self.spec.channels
                 else None,
-                "video": self._video,
+                "video": video,
+                "ffmpeg_version": None
+                if video is None
+                else self._ffmpeg_version or "unknown",
             }
         )
         return {fmt.METADATA_KEY: _dumps(info, "the episode metadata")}
@@ -674,8 +674,13 @@ class EpisodeWriter:
             ) as writer:
                 writer.write_table(trajectory)
                 writer.add_key_value_metadata(metadata)
-            for encoder in self._encoders.values():
+            for camera, encoder in self._encoders.items():
                 encoder.close()
+                if encoder.n_frames != self.n_frames:
+                    raise RuntimeError(
+                        f"the {camera} video holds {encoder.n_frames} frames, "
+                        f"the episode {self.n_frames}"
+                    )
             self._check_claim()
         except BaseException:
             self.abort()
@@ -734,8 +739,12 @@ class GraspDataRecorder:
     ) -> None:
         self.root = Path(root)
         self.spec = spec
-        self._ffmpeg = find_ffmpeg(ffmpeg) if "rgb" in spec.channels else None
-        self._ffmpeg_version = ffmpeg_version(self._ffmpeg) if self._ffmpeg else None
+        self._ffmpeg = None
+        self._ffmpeg_version = None
+        if "rgb" in spec.channels:
+            self._ffmpeg = find_ffmpeg(ffmpeg)
+            check_encoder(self._ffmpeg, spec.video.encoder)
+            self._ffmpeg_version = ffmpeg_version(self._ffmpeg)
 
     def files(self, object_type: str, episode_uid: str) -> EpisodeFiles:
         return episode_files(
