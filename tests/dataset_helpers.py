@@ -241,6 +241,13 @@ def rewrite(path, change):
     pq.write_table(table.replace_schema_metadata(metadata), path)
 
 
+def nested(depth, leaf=1.0):
+    """leaf inside depth mappings: {"a": {"a": ... leaf}}."""
+    for _ in range(depth):
+        leaf = {"a": leaf}
+    return leaf
+
+
 def edit(array, index, value):
     out = np.array(array, dtype=float)
     out[index] = value

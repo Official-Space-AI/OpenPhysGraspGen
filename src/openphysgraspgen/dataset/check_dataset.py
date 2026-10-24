@@ -293,6 +293,9 @@ RIGID_TOLERANCE = 1e-6
 MAX_PIXELS = 2**31 - 1
 # JSON integers of the episode metadata fit int64, as Parquet and Arrow readers hold them.
 INT64 = (-(2**63), 2**63 - 1)
+# How many levels the episode metadata's objects and arrays may nest, the footer's own
+# object the first: every Python then reads and walks a footer alike.
+MAX_NESTING = 32
 
 CONVENTIONS = {
     "units": "SI: metres, seconds, newtons, pascals, radians",
@@ -619,15 +622,14 @@ def state_error(frame: Mapping[str, object], step: Mapping[str, object]) -> str 
 
 def holds_a_value(value: object) -> bool:
     """Whether a value is a mapping with a leaf that is not null, at any depth."""
-    if isinstance(value, Mapping):
-        return any(_has_value(item) for item in value.values())
+    stack = [value] if isinstance(value, Mapping) else []
+    while stack:
+        for item in stack.pop().values():
+            if isinstance(item, Mapping):
+                stack.append(item)
+            elif item is not None:
+                return True
     return False
-
-
-def _has_value(value: object) -> bool:
-    if isinstance(value, Mapping):
-        return any(_has_value(item) for item in value.values())
-    return value is not None
 
 
 def facts_error(facts: object) -> str | None:
@@ -700,9 +702,18 @@ def _json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _nesting(text: str) -> int:
+    """How many levels a JSON text's objects and arrays nest: its escapes are dropped,
+    then its strings, and the brackets left are counted, each pass in linear time."""
+    bare = re.sub(r'"[^"]*"', "", re.sub(r"\\.", "", text, flags=re.DOTALL))
+    steps = (1 if c in "[{" else -1 for c in re.findall(r"[\[\]{}]", bare))
+    return max(itertools.accumulate(steps), default=0)
+
+
 def parse_footer(raw: bytes | str) -> dict[str, Any]:
     """An episode's metadata from its footer value: one JSON object in UTF-8 whose
-    numbers are finite floats and int64 integers and whose objects repeat no key.
+    numbers are finite floats and int64 integers, whose objects repeat no key, and
+    whose objects and arrays nest at most MAX_NESTING levels.
 
     Raises ValueError with the reason, which reads after "its metadata".
     """
@@ -710,6 +721,9 @@ def parse_footer(raw: bytes | str) -> dict[str, Any]:
         text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
     except UnicodeDecodeError as exc:
         raise ValueError(f"is not UTF-8: {exc}") from None
+    # Counted before parsing: how deep a parser goes depends on the Python.
+    if _nesting(text) > MAX_NESTING:
+        raise ValueError(f"is not JSON: it nests deeper than {MAX_NESTING} levels")
     try:
         value = json.loads(
             text,
@@ -718,8 +732,6 @@ def parse_footer(raw: bytes | str) -> dict[str, Any]:
             parse_int=_json_int,
             object_pairs_hook=_json_object,
         )
-    except RecursionError:
-        raise ValueError("is not JSON: it nests too deeply") from None
     except ValueError as exc:
         raise ValueError(f"is not JSON: {exc}") from None
     if not isinstance(value, dict):
@@ -3711,14 +3723,19 @@ def check_consistency(
 # --- diversity ------------------------------------------------------------------------
 
 
-def _leaves(value: Any, prefix: str = "") -> dict[str, Any]:
-    """A nested mapping as {"a.b.c": leaf}; lists stay leaves."""
-    if isinstance(value, dict):
-        out: dict[str, Any] = {}
-        for key, item in value.items():
-            out.update(_leaves(item, f"{prefix}.{key}" if prefix else str(key)))
-        return out
-    return {prefix: value}
+def _leaves(value: Any) -> dict[str, Any]:
+    """A nested mapping as {"a.b.c": leaf}, in its order; lists stay leaves."""
+    out: dict[str, Any] = {}
+    stack = [("", value)]
+    while stack:
+        path, item = stack.pop()
+        if not isinstance(item, dict):
+            out[path] = item
+            continue
+        stack += reversed(
+            [(f"{path}.{key}" if path else str(key), v) for key, v in item.items()]
+        )
+    return out
 
 
 def _is_number(value: Any) -> bool:

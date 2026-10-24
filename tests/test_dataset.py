@@ -45,6 +45,7 @@ from dataset_helpers import (
     make_step,
     minimal_mp4,
     needs_av1,
+    nested,
     open_episode,
     rewrite,
     sample_entry,
@@ -610,7 +611,17 @@ def test_the_reached_state_must_be_finite_on_a_finite_step(tmp_path):
         (
             {"facts": {**FACTS, "material": {"E_pa": 10**400}}},
             ValueError,
-            r"integers beyond int64: is not JSON: 1000000000.* is out of the int64",
+            r"levels of nesting: is not JSON: 1000000000.* is out of the int64",
+        ),
+        # The footer is level 1 and facts level 2: 31 more levels make 33. On some
+        # Pythons json.dumps itself gives up on the deeper one.
+        *(
+            (
+                {"facts": {**FACTS, "history": nested(depth)}},
+                ValueError,
+                "levels of nesting: is not JSON: it nests deeper than 32 levels$",
+            )
+            for depth in (31, 1200)
         ),
         ({"header": {"seed": -(2**63) - 1}}, ValueError, "out of the int64 range"),
         ({"task": ["lift"]}, TypeError, "task must be a mapping or None"),
@@ -634,6 +645,15 @@ def test_episode_arguments_are_checked(tmp_path, change, error, message):
     with pytest.raises(error, match=message):
         open_episode(recorder, **change)
     assert files_under(tmp_path) == []
+
+
+def test_an_episodes_metadata_may_nest_32_levels(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    facts = {**FACTS, "history": nested(30)}
+    write_episode(recorder, facts=facts)
+    files = recorder.files("apple", "ep-0")
+    for path in (files.frames, files.trajectory):
+        assert episode_metadata(path)["facts"] == facts
 
 
 def test_an_episode_states_a_source_count_of_at_least_its_steps(tmp_path):
@@ -1897,12 +1917,34 @@ def _darker(step, spec, n_contacts=2):
         (b"[1, 2]", "is not a JSON object"),
         (b'{"a": "\xff"}', "is not UTF-8"),
         (b"\xef\xbb\xbf{}", "is not JSON"),
-        (b"[" * 100000, "is not JSON"),
+        pytest.param(
+            b"[" * 100000,
+            "is not JSON: it nests deeper than 32 levels",
+            id="100000-levels",
+        ),
+        pytest.param(
+            b'{"a": ' + b"[" * 32 + b"]" * 32 + b"}",
+            "it nests deeper than 32 levels",
+            id="33-levels",
+        ),
+        pytest.param(
+            b'{"a": ' + b"[" * 2000 + b"}",
+            "it nests deeper than 32 levels",
+            id="2000-levels-unclosed",
+        ),
     ],
 )
 def test_the_footer_is_strict_json(raw, message):
     with pytest.raises(ValueError, match=message):
         fmt.parse_footer(raw)
+
+
+def test_the_footer_nests_at_most_32_levels():
+    # Brackets and escaped quotes inside a string are no levels.
+    value = fmt.parse_footer('{"a": ' + "[" * 31 + '"[\\"{"' + "]" * 31 + "}")["a"]
+    for _ in range(31):
+        (value,) = value
+    assert value == '["{'
 
 
 def test_the_footer_keeps_every_number_it_can_hold():

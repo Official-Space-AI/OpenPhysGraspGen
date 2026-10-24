@@ -195,13 +195,20 @@ def _integer(name: str, value: Any) -> int:
 
 def _dumps(value: Any, what: str) -> str:
     """value as the compact JSON the check reads back: no NaN or infinity, integers
-    that fit int64."""
+    that fit int64, at most fmt.MAX_NESTING levels of objects and arrays."""
     try:
         text = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
         fmt.parse_footer(text)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, RecursionError) as exc:
+        # json.dumps raises RecursionError on a value deeper than this Python encodes.
+        problem = (
+            f"is not JSON: it nests deeper than {fmt.MAX_NESTING} levels"
+            if isinstance(exc, RecursionError)
+            else exc
+        )
         raise ValueError(
-            f"{what} must be JSON without NaN, infinity or integers beyond int64: {exc}"
+            f"{what} must be JSON without NaN, infinity, integers beyond int64 or more "
+            f"than {fmt.MAX_NESTING} levels of nesting: {problem}"
         ) from exc
     return text
 

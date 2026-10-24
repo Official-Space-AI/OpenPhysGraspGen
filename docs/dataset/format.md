@@ -188,7 +188,8 @@ breaks these rules cannot be written.
 
 Both Parquet files of an episode carry the same metadata, byte for byte, as JSON under the footer
 key `physgraspgen`. The JSON is strict: UTF-8, one object, no key repeated in an object, floats
-that are finite and integers that fit int64. It holds exactly these keys:
+that are finite, integers that fit int64, and objects and arrays nested at most 32 levels deep,
+the metadata's own object the first. It holds exactly these keys:
 
 | Key | Meaning |
 |---|---|

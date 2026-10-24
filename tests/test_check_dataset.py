@@ -32,6 +32,7 @@ from dataset_helpers import (
     criteria_text,
     fake_av1,
     needs_av1,
+    nested,
     scene_frame,
 )
 from mp4_index import minimal_mp4, sample_entry
@@ -1362,6 +1363,26 @@ def test_a_footer_that_is_not_strict_json_is_found(root, raw, message):
     # Without a footer the file states no columns to check, and no cameras' videos.
     assert not any(e.startswith("column") for e in found)
     assert report["items"]["diversity"]["files_not_read"] == [APPLE]
+
+
+@pytest.mark.parametrize(("depth", "ok"), [(30, True), (31, False), (1200, False)])
+def test_a_footer_nests_at_most_32_levels_on_any_python(root, capsys, depth, ok):
+    # Written as text: a Python may not encode so deep a value. The footer is level 1,
+    # facts level 2, so facts.material nested 30 levels makes 32.
+    footer = footer_of(root, APPLE)
+    raw = compact({**footer, "facts": {**footer["facts"], "material": "deep"}})
+    raw = raw.replace(b'"deep"', b'{"a":' * depth + b"1.0" + b"}" * depth)
+    for rel in (APPLE, APPLE_TRAJECTORY):
+        rewrite(root, rel, footer=raw)
+    # Too deep is the file's finding: the run completes, and fails.
+    code, _, _, payload = main(capsys, root, "--seed", SEED)
+    assert (code, payload["pass"]) == ((0, True) if ok else (1, False))
+    report = check(root)
+    too_deep = "its physgraspgen metadata is not JSON: it nests deeper than 32 levels"
+    for rel in (APPLE, APPLE_TRAJECTORY):
+        assert errors(report, rel) == ([] if ok else [too_deep])
+    tables = report["items"]["diversity"]["tables"]
+    assert ("material." + ".".join(["a"] * 30) in tables) is ok
 
 
 def drop(name):
@@ -2941,6 +2962,17 @@ def test_diversity_reports_files_not_read(root):
     result = check(root)["items"]["diversity"]
     assert result["files_not_read"] == [APPLE]
     assert not result["pass"]
+
+
+def test_diversity_walks_facts_of_any_depth():
+    # Footers nest at most 32 levels, and nothing walks one by recursion either.
+    facts = {k: {"x": 1} for k in fmt.FACT_KINDS}
+    facts["material"] = nested(5000)
+    result = diversity([typed("data/apple/ep-0.parquet", {"facts": facts})])
+    assert result["pass"]
+    assert ".".join(["material"] + ["a"] * 5000) in result["tables"]
+    assert fmt.holds_a_value(nested(5000))
+    assert not fmt.holds_a_value(nested(5000, None))
 
 
 # --- the published tools --------------------------------------------------------------
