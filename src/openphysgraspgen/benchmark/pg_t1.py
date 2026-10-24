@@ -221,7 +221,11 @@ def _schedule(value: object, n_phases: int) -> bool:
 
 
 def task_block_problems(block: object, recorded_fps: object = None) -> list[str]:
-    """Every missing or malformed key of an episode's task block; empty when it is valid."""
+    """Every missing or malformed key of an episode's task block; empty when it is valid.
+
+    recorded_fps is the episode's rate; criterion.fps is compared with it only when it
+    is given.
+    """
     if not isinstance(block, Mapping):
         return ["task: missing, or not a mapping"]
     problems: list[str] = []
@@ -368,7 +372,7 @@ def task_block_problems(block: object, recorded_fps: object = None) -> list[str]
             required=False,
         )
 
-    key(
+    labels = key(
         "keep_labels",
         lambda v: (
             v is None
@@ -376,7 +380,14 @@ def task_block_problems(block: object, recorded_fps: object = None) -> list[str]
         ),
         f"must be null or a list of labels out of {', '.join(LABELS)}",
     )
-    key("keep_requires_lift", lambda v: isinstance(v, bool), "must be true or false")
+    lift_kept = key(
+        "keep_requires_lift", lambda v: isinstance(v, bool), "must be true or false"
+    )
+    # The generation run applies its lift condition only together with a label list.
+    if lift_kept is True and labels is None:
+        problems.append(
+            "keep_requires_lift: must be false when keep_labels is null, got True"
+        )
     key(
         "stages",
         lambda v: (
@@ -442,7 +453,8 @@ def _criterion_problems(
 
     differs("id", criterion.get("id"), block.get("criterion_id"), "criterion_id")
     differs("task", criterion.get("task"), block.get("name"), "name")
-    differs("fps", criterion.get("fps"), recorded_fps, "recorded_fps")
+    if recorded_fps is not None:
+        differs("fps", criterion.get("fps"), recorded_fps, "recorded_fps")
     internal = criterion.get("internal")
     if isinstance(internal, Mapping):
         differs(

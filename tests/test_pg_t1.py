@@ -1307,7 +1307,19 @@ def test_the_task_block_check_names_every_problem():
         "keep_requires_lift",
     ]
     assert task_block_problems(block(CARRY, CP), 60) == []
+    every = block(CARRY, CP, keep_labels=None, keep_requires_lift=False)
+    assert task_block_problems(every, 60) == []
     assert task_block_problems(None) == ["task: missing, or not a mapping"]
+
+
+def test_criterion_fps_is_compared_only_with_a_recorded_rate():
+    criterion = {"id": "carry-place-v1", "task": CARRY, "fps": 60}
+    task = block(CARRY, CP, criterion=dict(criterion, internal={"hold_s": 4.0}))
+    assert task_block_problems(task) == []
+    assert task_block_problems(task, 60) == []
+    assert task_block_problems(task, 30) == [
+        "criterion.fps: 60 differs from recorded_fps 30"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -1341,6 +1353,7 @@ def test_a_judge_key_the_task_does_not_need_still_has_its_type(key, value, rule)
             "criterion.placement.floor_arm",
         ),
         ({"keep_labels": ["kept"]}, "keep_labels"),
+        ({"keep_labels": None}, "keep_requires_lift"),
         ({"stages": {"lifted": "yes"}}, "stages"),
     ],
 )

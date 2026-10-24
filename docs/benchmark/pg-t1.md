@@ -44,7 +44,9 @@ print(report_text(report))
 
 `score_episode(columns, metadata)` scores one episode from its trajectory columns (as
 `read_trajectory` returns them) and its footer metadata, and raises `Refused` with the rule it
-breaks.
+breaks. `task_block_problems(block, recorded_fps)` lists the problems of a task block, as a
+`task_block` refusal names them, so an exporter can check its blocks before writing them; without
+`recorded_fps` it does not compare `criterion.fps`.
 
 ## Inputs
 
@@ -90,11 +92,11 @@ key that is missing or malformed.
 | `judge` | mapping | always | the numbers the generator judged the episode with, below |
 | `place_target` | mapping or null | a mapping under a task that carries, else null or absent | the mat: `x_m`, `y_m` and `half_extent_m` (an axis-aligned square in the world frame), optionally `centre_x_m` and `centre_y_m` |
 | `keep_labels` | list of labels, or null | always | the labels the generation run kept; null when it kept every label |
-| `keep_requires_lift` | bool | always | true when the run also kept only the episodes its own verdicts said lifted (under `search_lift_hold_2s`, rose 5 cm) or that it stopped on a drop |
+| `keep_requires_lift` | bool | always | true when the run kept only the episodes whose own `lifted` verdict was true, that it stopped on a drop or, under `search_lift_hold_2s`, that had a row up under C; false when `keep_labels` is null, since the run applies this condition only together with a label list |
 | `stages` | mapping of stage to true, false or null, or null | always | the generator's own stage verdicts, for the check |
 | `agreement` | mapping or null | always | the generator's record of the C verdict, for the check |
 | `place` | mapping or null | always | the generator's put-down record, for the check |
-| `criterion` | mapping or null | optional | the generator's criterion record; where it gives `id`, `task`, `fps`, `internal.hold_s`, `internal.carry_m`, an `internal` number named like a `judge` key or `placement.floor_arm`, each must agree with this block |
+| `criterion` | mapping or null | optional | the generator's criterion record; where it gives `id`, `task`, `fps` (with `recorded_fps`), `internal.hold_s`, `internal.carry_m` or an `internal` number named like a `judge` key, each must agree with the episode, and a `placement` must name the same `floor_arm`, which it leaves out for a demonstration |
 | `n_retries` | int >= 0 or null | optional | recoveries flown (reported) |
 | `timing_scale` | mapping of phase to factor > 0, or null | optional | the per-episode timing factors of phases before the close (`search`, `approach`, `descend`); a block that scales a later phase is refused |
 
