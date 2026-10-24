@@ -10,8 +10,9 @@ permissions:
 
 jobs:
   test-oldest:
-    # The oldest versions the dataset check accepts, beside a Python it refuses.
-    runs-on: ubuntu-latest
+    # The oldest versions the dataset check accepts, beside a Python it refuses. Python
+    # 3.9 has no build for Ubuntu images newer than 24.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
