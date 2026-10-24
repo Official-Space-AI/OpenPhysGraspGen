@@ -366,7 +366,7 @@ def test_columns_can_be_read_alone_across_row_groups(tmp_path):
     )
 
 
-def test_float_columns_are_byte_stream_split(tmp_path):
+def test_columns_are_encoded_for_their_values(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     write_episode(recorder)
     metadata = pq.read_metadata(recorder.files("apple", "ep-0").frames)
@@ -376,6 +376,8 @@ def test_float_columns_are_byte_stream_split(tmp_path):
         for i in range(columns.num_columns)
     }
     assert "BYTE_STREAM_SPLIT" in encodings["depth.front.depth_m.list.element"]
+    assert "RLE_DICTIONARY" in encodings["segmentation.front.mask.list.element"]
+    assert "RLE_DICTIONARY" in encodings["segmentation.wrist.mask.list.element"]
     assert metadata.num_row_groups == 3
 
 

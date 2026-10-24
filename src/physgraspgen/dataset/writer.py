@@ -185,11 +185,14 @@ def _writer_options(schema: pa.Schema, spec: DatasetSpec) -> dict[str, Any]:
         for f in schema
         if not pa.types.is_list(f.type) and not pa.types.is_fixed_size_list(f.type)
     ]
+    masks = {f.name for f in schema if f.name.endswith(".mask")}
     return {
         "compression": "zstd",
         "compression_level": spec.zstd_level,
-        # Dictionary pages inflate wide float columns; only the text columns repeat.
-        "use_dictionary": [f.name for f in schema if pa.types.is_string(f.type)],
+        # Dictionary pages inflate wide float columns. Text repeats, and Parquet has no
+        # 8-bit type: a mask pixel is a 4-byte value unless its few classes are coded.
+        "use_dictionary": [f.name for f in schema if pa.types.is_string(f.type)]
+        + [path for path, _ in leaves if path.split(".list.")[0] in masks],
         "use_byte_stream_split": [
             path for path, kind in leaves if kind in ("FLOAT", "DOUBLE")
         ],
