@@ -12,6 +12,7 @@ import json
 import math
 import subprocess
 import sys
+from collections import Counter
 
 import numpy as np
 import pytest
@@ -37,12 +38,23 @@ from openphysgraspgen.pipeline import main
 
 S4 = [30, 90, 30, 30, 60, 30, 240]
 S2 = [30, 90, 30, 30, 60, 30, 120]
+PK = [30, 30, 60, 30]
 LH = [30, 30, 60, 30, 240]
 LHP = [30, 30, 30, 30, 240, 30, 60]
 RETRY = [30, 30, 60, 30, 240, 30, 90, 30, 30, 60, 30, 240]
 CP = [30, 90, 30, 30, 60, 30, 30, 240, 60, 45, 45, 30]
 CARRY = "search_lift_hold_carry_place"
 CARRY_10CM = "search_lift_hold_carry_place_10cm"
+SCHEDULES = {
+    "pick": PK,
+    "lift_hold": LH,
+    "lift_hold_place": LHP,
+    "search_lift_hold": S4,
+    "lift_hold_retry": RETRY,
+    "search_lift_hold_2s": S2,
+    CARRY: CP,
+    CARRY_10CM: CP,
+}
 TARGET = {
     "x_m": 0.5,
     "y_m": 0.15,
@@ -233,8 +245,10 @@ def put_down(
     return rows[:truncate]
 
 
-def put_back(*, fall=0.0, drift=0.0, never_open=False, drop=False, schedule=LHP):
-    """lift_hold_place: lift 15 cm, hold, lower with the tool and let go where it rested;
+def put_back(
+    *, fall=0.0, drift=0.0, never_open=False, drop=False, schedule=LHP, top=0.15
+):
+    """lift_hold_place: lift top, hold, lower with the tool and let go where it rested;
     with drop the object falls out of the jaws as the tool starts down."""
     phases = TASKS["lift_hold_place"].phases
     starts = [sum(schedule[:k]) for k in range(len(schedule))]
@@ -248,15 +262,15 @@ def put_back(*, fall=0.0, drift=0.0, never_open=False, drop=False, schedule=LHP)
             z_tool, r = 0.05, 0.0
         elif w == 3:
             u = (i - starts[3] + 1) / schedule[3]
-            z_tool, r = 0.05 + 0.17 * u, 0.15 * u
+            z_tool, r = 0.05 + 0.17 * u, top * u
         elif w == 4:
-            z_tool, r = 0.22, 0.15
+            z_tool, r = 0.22, top
         elif w == 5:
             k = i - starts[5] + 1
             u = k / schedule[5]
-            z_tool, r = 0.22 - 0.17 * u, 0.15 * (1.0 - u)
+            z_tool, r = 0.22 - 0.17 * u, top * (1.0 - u)
             if drop:
-                r = max(0.0, 0.15 - 0.5 * 9.81 * (k / 60) ** 2)
+                r = max(0.0, top - 0.5 * 9.81 * (k / 60) ** 2)
         else:
             z_tool = 0.05
             r = max(0.0, fall * (1.0 - min(1.0, (i - starts[6] + 1) / 3.0)))
@@ -790,6 +804,17 @@ def rate(stage, key):
     return round(stage[key], 4), round(lo, 4), round(hi, 4)
 
 
+def counts(stage):
+    return {
+        k: stage[k] for k in ("planned", "undecidable", "true", "false", "not_reached")
+    }
+
+
+def printed(report):
+    """The printed table's lines with their runs of spaces collapsed."""
+    return [" ".join(line.split()) for line in report_text(report).splitlines()]
+
+
 def test_the_put_down_scope_gives_the_report_vector(vectors):
     entry = vectors[0]["tasks"][CARRY]
     assert (entry["criterion_id"], entry["placed_rule"]) == (
@@ -803,7 +828,13 @@ def test_the_put_down_scope_gives_the_report_vector(vectors):
         assert rate(cells["lifted"], "of_attempted") == (1.0, 0.7575, 1.0)
         assert rate(cells["placed"], "of_attempted") == (0.1111, 0.0199, 0.435)
         assert rate(cells["placed"], "of_all") == (0.0833, 0.0149, 0.3539)
-        assert (cells["placed"]["true"], cells["placed"]["false"]) == (1, 8)
+        assert counts(cells["placed"]) == {
+            "planned": 12,
+            "undecidable": 0,
+            "true": 1,
+            "false": 8,
+            "not_reached": 3,
+        }
         assert cells["headline"]["stage"] == "placed"
     assert rate(c["held"], "of_all") == (1.0, 0.7575, 1.0)
     assert rate(b["held"], "of_attempted") == (0.8333, 0.552, 0.953)
@@ -830,6 +861,9 @@ def test_the_put_down_scope_gives_the_report_vector(vectors):
         "put_down_incomplete": 1,
     }
     assert b["failures"]["of_all"]["dropped"] == 0.25
+    # Over attempted 1 of 9, over all 1 of 12, under C and again under B.
+    row = "placed 1/9 0.111 [0.020, 0.435] 1/12 0.083 [0.015, 0.354]"
+    assert printed(vectors[0]).count(row) == 2
 
 
 def test_the_two_second_scope_gives_the_report_vector(vectors):
@@ -840,11 +874,14 @@ def test_the_two_second_scope_gives_the_report_vector(vectors):
     assert c["held"]["of_all"] == 0.5
     assert rate(b["lifted"], "of_all") == (0.25, 0.0456, 0.6994)
     held = b["held"]
-    assert (held["undecidable"], held["of_all"], held["of_attempted"]) == (
-        4,
-        None,
-        None,
-    )
+    assert counts(held) == {
+        "planned": 4,
+        "undecidable": 4,
+        "true": 0,
+        "false": 0,
+        "not_reached": 0,
+    }
+    assert (held["of_all"], held["of_attempted"]) == (None, None)
     assert c["task_score"] is b["task_score"] is None
     assert c["task_score_why_null"] == "no put-down planned"
     assert c["placed"] is None
@@ -985,11 +1022,35 @@ def test_a_centroid_dip_in_the_window_outranks_a_supported_row():
     assert record["C"]["reasons"] == ["dipped_in_window"]
 
 
-def test_criterion_b_has_no_tie():
-    record = score(ramp("search_lift_hold", S4, 0.12), block("search_lift_hold", S4))
-    assert record["B"]["lifted"] is False
-    rise = (0.05 + 0.12) - 0.05
-    assert rise < 0.12
+def at_heights(rows, z):
+    """The rows with the object's centroid at height z(i) and its box 4 cm around it."""
+    return [
+        dict(
+            r,
+            **{
+                "object.centroid": (*r["object.centroid"][:2], z(i)),
+                "object.bbox_min": (*r["object.bbox_min"][:2], z(i) - 0.04),
+                "object.bbox_max": (*r["object.bbox_max"][:2], z(i) + 0.04),
+            },
+        )
+        for i, r in enumerate(rows)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("top", "lifted", "held", "crossing"),
+    [(0.16, True, True, 269), (math.nextafter(0.16, 0.0), False, None, None)],
+)
+def test_criterion_b_counts_a_rise_of_exactly_12_cm_and_has_no_tie(
+    top, lifted, held, crossing
+):
+    # The object rests at 0.04 m and stands at top from row 269, the last lift row, on.
+    assert 0.16 - 0.04 == 0.12
+    rows = at_heights(
+        ramp("search_lift_hold", S4, 0.0), lambda i: 0.04 if i < 269 else top
+    )
+    b = score(rows, block("search_lift_hold", S4))["B"]
+    assert (b["lifted"], b["held"], b["crossing"]) == (lifted, held, crossing)
 
 
 @pytest.mark.parametrize(
@@ -1003,6 +1064,19 @@ def test_a_dip_counts_up_to_the_last_row_of_each_window(dip, held_c, held_b):
     assert (record["C"]["held"], record["B"]["held"]) == (held_c, held_b)
     assert record["C"]["agreement"]["window_end_frame"] == 368
     assert record["B"]["window_end"] == 504
+
+
+@pytest.mark.parametrize(
+    ("cut", "held_c", "held_b"),
+    [(368, None, None), (369, True, None), (504, True, None), (505, True, True)],
+)
+def test_a_window_is_cut_short_only_when_its_last_row_is_missing(cut, held_c, held_b):
+    # C's window ends at row 368 and B's at row 504; the recording keeps rows 0 to cut - 1.
+    rows = ramp("search_lift_hold", S4, 0.15, cut=cut)
+    record = score(rows, block("search_lift_hold", S4))
+    assert (record["C"]["held"], record["B"]["held"]) == (held_c, held_b)
+    reason = None if held_c else "window_truncated"
+    assert record["C"]["agreement"]["reason"] == reason
 
 
 def test_a_row_that_is_not_finite_is_skipped_inside_a_window():
@@ -1027,6 +1101,31 @@ def test_a_skipped_lift_leaves_an_episode_without_a_rise_undecided():
     assert record["C"]["class"] == "undecided" and record["C"]["reasons"] == [
         "incomplete"
     ]
+
+
+def test_an_episode_with_no_usable_row_is_undecided_where_b_cannot_decide():
+    rows = [dict(r, finite=False) for r in ramp("search_lift_hold_2s", S2, 0.15)]
+    record = score(rows, block("search_lift_hold_2s", S2))
+    c, b = record["C"], record["B"]
+    assert record["decidable"] == {"C": True, "B": False}
+    assert (c["lifted"], c["class"], c["reasons"]) == (
+        None,
+        "undecided",
+        ["incomplete"],
+    )
+    assert (b["lifted"], b["class"], b["reasons"]) == (
+        None,
+        "undecided",
+        ["no_usable_rows"],
+    )
+
+
+def test_a_drop_stop_before_any_row_is_up_is_not_lifted_under_c():
+    rows = ramp("search_lift_hold_2s", S2, 0.03, cut=300)
+    record = score(rows, block("search_lift_hold_2s", S2, stop="dropped"))
+    c = record["C"]
+    assert (c["lifted"], c["agreement"]["reason"]) == (False, "stopped_dropped")
+    assert (c["class"], c["reasons"]) == ("not_lifted", ["stopped_dropped"])
 
 
 def test_another_recorded_rate_sizes_both_windows(tmp_path):
@@ -1109,22 +1208,33 @@ def widened(rows, first, last, width):
     ]
 
 
-def moved_at(rows, at, dx):
-    """The rows with the object moved dx along x on row at."""
+def moved_at(rows, at, offset):
+    """The rows with the object moved by offset (x, y, z) on row at."""
     return [
-        dict(r, **{k: (r[k][0] + dx, *r[k][1:]) for k in OBJECT}) if i == at else r
+        dict(r, **{k: tuple(a + d for a, d in zip(r[k], offset)) for k in OBJECT})
+        if i == at
+        else r
         for i, r in enumerate(rows)
     ]
 
 
-# The put-back's hold ends at row 354, 240 rows after the crossing; the place waypoints
-# start at rows 360 and 390, where the jaws open; its last 10 rows are 440 to 449.
+def without_tool_at(rows, at):
+    """The rows with no reached tool height on row at."""
+    pose = (0.5, 0.0, math.nan, 0.0, 0.0, 0.0, 1.0)
+    return [
+        dict(r, **{"robot.ee_pose": pose}) if i == at else r for i, r in enumerate(rows)
+    ]
+
+
+# The put-back's crossing is row 114 and its hold ends at row 354, 240 rows later; the
+# place waypoints start at rows 360 and 390, where the jaws open; its last 10 rows are
+# 440 to 449.
 @pytest.mark.parametrize(
     ("rows", "verdict", "reasons", "why"),
     [
         (put_back(drop=True), False, ["descent_not_with_tool"], None),
-        (moved_at(put_back(), 440, 0.003), False, ["not_at_rest"], None),
-        (moved_at(put_back(), 439, 0.003), True, [], None),
+        (moved_at(put_back(), 440, (0.003, 0.0, 0.0)), False, ["not_at_rest"], None),
+        (moved_at(put_back(), 439, (0.003, 0.0, 0.0)), True, [], None),
         (widened(put_back(), 370, 370, 0.05 + 2e-6), False, ["fell_on_release"], None),
         (widened(put_back(), 370, 370, 0.05 + 0.5e-6), True, [], None),
         (widened(put_back(), 356, 389, 0.12), None, [], "too_few_carried_rows"),
@@ -1134,6 +1244,19 @@ def moved_at(rows, at, dx):
             ["descent_not_with_tool", "fell_on_release"],
             None,
         ),
+        ([dict(r, finite=False) for r in put_back()], None, [], "no_usable_rows"),
+        (put_back(top=0.11), None, [], "internal_lift_not_met"),
+        (put_back()[:354], None, [], "internal_hold_truncated"),
+        (put_back()[:355], None, [], "fewer_than_10_rows_after_hold"),
+        (
+            moved_at(put_back(), 200, (0.0, 0.0, -0.05)),
+            None,
+            [],
+            "internal_hold_not_met",
+        ),
+        (put_back()[:363], None, [], "fewer_than_10_rows_after_hold"),
+        (put_back()[:364], False, ["never_released"], None),
+        (without_tool_at(put_back(), 370), None, [], "ee_pose_missing"),
     ],
 )
 def test_each_put_back_bound(rows, verdict, reasons, why):
@@ -1167,6 +1290,18 @@ def pushed(dx):
     return lambda i: (dx * clamp((i - 650) / 20), 0.0)
 
 
+def nudged(at):
+    return lambda i: (0.003, 0.0) if i == at else (0.0, 0.0)
+
+
+def pressed(rows, at, force):
+    """The rows with the bench force set to force on row at."""
+    return [
+        dict(r, **{"force.ground_force_mag": force}) if i == at else r
+        for i, r in enumerate(rows)
+    ]
+
+
 @pytest.mark.parametrize(
     ("rows", "verdict", "reasons", "fact", "value"),
     [
@@ -1194,6 +1329,12 @@ def pushed(dx):
             0.011,
         ),
         (put_down(shove=pushed(0.009)), True, [], "push_after_release_m", 0.009),
+        # The rest window is the last 30 rows of the span, 690 to 719.
+        (put_down(wander=nudged(690)), False, ["not_at_rest"], "rest_wander_m", 0.003),
+        (put_down(wander=nudged(689)), True, [], "rest_wander_m", 0.0),
+        # The force peak is read up to the row the jaws are fully open, 630.
+        (pressed(put_down(), 630, 5.0), True, [], "set_down_bench_force_peak_n", 5.0),
+        (pressed(put_down(), 631, 5.0), True, [], "set_down_bench_force_peak_n", 0.0),
     ],
 )
 def test_each_put_down_bound(rows, verdict, reasons, fact, value):
@@ -1204,6 +1345,61 @@ def test_each_put_down_bound(rows, verdict, reasons, fact, value):
         None,
     )
     assert placed["facts"][fact] == pytest.approx(value, abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("dx", "dy"), [(0.047, 0), (-0.047, 0), (0, 0.047), (0, -0.047)]
+)
+def test_the_object_must_end_on_the_mat_on_every_side(dx, dy):
+    # The object ends 8 cm wide around (0.5, 0.15); the mat is 0.154 m wide.
+    target = dict(TARGET, x_m=TARGET["x_m"] + dx, y_m=TARGET["y_m"] + dy)
+    placed = score(put_down(), block(CARRY, CP, place_target=target))["placed_task"]
+    assert (placed["verdict"], placed["reasons"]) == (False, ["off_target"])
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        # Exactly at the widest held width plus the deadband: not open.
+        widened(put_down(), 560, 589, 0.076 + 0.003),
+        # The widest held width is on the window's last row, 240 after the crossing.
+        widened(widened(put_down(), 499, 499, 0.081), 520, 549, 0.082),
+    ],
+)
+def test_the_jaws_open_only_past_the_widest_held_width_and_the_deadband(rows):
+    placed = score(rows, block(CARRY, CP))["placed_task"]
+    assert (placed["facts"]["opening_frame"], placed["verdict"]) == (600, True)
+
+
+def test_a_put_down_with_no_row_after_the_jaws_are_open_is_still_touching():
+    # The judged span is rows 600 to 629: no row of it follows row 630, where the jaws
+    # are fully open.
+    judge = {"opening_to_end_frames": 30, "rest_window_frames": 20}
+    placed = score(put_down(), block(CARRY, CP, judge=judge))["placed_task"]
+    assert (placed["verdict"], placed["reasons"]) == (False, ["still_touching"])
+    assert placed["facts"]["gripper_contacts_after_open"] == 0
+
+
+def test_the_10_cm_centroid_bound_is_inclusive():
+    target = dict(TARGET, x_m=TARGET["x_m"] + 0.003)
+    task = block(CARRY_10CM, CP, place_target=target)
+    rows = put_down(task=CARRY_10CM)
+    error = score(rows, task)["placed_task"]["facts"]["place_error_m"]
+    for bound, verdict in ((error, True), (math.nextafter(error, 0.0), False)):
+        judge = {"place_error_tol_m": bound}
+        task = block(CARRY_10CM, CP, place_target=target, judge=judge)
+        assert score(rows, task)["placed_task"]["verdict"] is verdict
+
+
+def test_a_hold_the_recording_cuts_short_leaves_the_put_down_unjudged():
+    # No drop stop: the internal hold from the crossing at row 259 needs rows to 499.
+    record = score(put_down(truncate=400), block(CARRY, CP))
+    assert record["placed_task"]["why"] == "internal_hold_truncated"
+    assert (record["C"]["class"], record["C"]["reasons"]) == (
+        "undecided",
+        ["internal_hold_truncated"],
+    )
+    assert (record["B"]["held"], record["B"]["reasons"]) == (None, ["window_truncated"])
 
 
 def test_a_carry_the_recording_cuts_before_the_jaws_open_is_not_judged():
@@ -1322,6 +1518,26 @@ def test_the_task_block_check_names_every_problem():
     assert task_block_problems(None) == ["task: missing, or not a mapping"]
 
 
+def test_an_unknown_task_name_still_has_its_other_keys_checked():
+    task = block(
+        "lift_hold",
+        LH,
+        name="lift_and_hold",
+        phases="approach",
+        frames_per_waypoint=[],
+        criterion_id=1,
+        stop_reason="slipped",
+    )
+    keys = [p.split(":")[0] for p in task_block_problems(task, 60)]
+    assert keys == [
+        "name",
+        "phases",
+        "frames_per_waypoint",
+        "criterion_id",
+        "stop_reason",
+    ]
+
+
 def test_criterion_fps_is_compared_only_with_a_recorded_rate():
     criterion = {"id": "carry-place-v1", "task": CARRY, "fps": 60}
     task = block(CARRY, CP, criterion=dict(criterion, internal={"hold_s": 4.0}))
@@ -1350,25 +1566,49 @@ def test_a_judge_key_the_task_does_not_need_still_has_its_type(key, value, rule)
 
 
 @pytest.mark.parametrize(
-    ("extra", "problem"),
+    ("task", "extra", "problem"),
     [
-        ({"floor_arm": "no_vision_pick"}, "floor_arm"),
-        ({"timing_scale": {"place": 0.9}}, "timing_scale"),
+        (CARRY, {"floor_arm": "no_vision_pick"}, "floor_arm"),
+        ("search_lift_hold", {"floor_arm": "reflection"}, "floor_arm"),
+        (CARRY, {"timing_scale": {"place": 0.9}}, "timing_scale"),
+        ("lift_hold", {"place_target": dict(TARGET)}, "place_target"),
+        (CARRY, {"judge": {"place_error_tol_m": 0.005}}, "judge.place_error_tol_m"),
         (
+            "lift_hold",
+            {"judge": {"approach_height_m": 0.12}},
+            "judge.approach_height_m",
+        ),
+        (CARRY, {"keep_labels": []}, "keep_labels"),
+        (CARRY, {"keep_labels": ["kept"]}, "keep_labels"),
+        (CARRY, {"keep_labels": None}, "keep_requires_lift"),
+        (CARRY, {"stages": {"lifted": "yes"}}, "stages"),
+        (CARRY, {"criterion": {"id": "carry-place-10cm-v1"}}, "criterion.id"),
+        (CARRY, {"criterion": {"task": CARRY_10CM}}, "criterion.task"),
+        (CARRY, {"criterion": {"fps": 30}}, "criterion.fps"),
+        (
+            CARRY,
+            {"criterion": {"internal": {"hold_s": 3.0}}},
+            "criterion.internal.hold_s",
+        ),
+        (
+            CARRY,
+            {"criterion": {"internal": {"carry_m": 0.10}}},
+            "criterion.internal.carry_m",
+        ),
+        (
+            CARRY,
             {"criterion": {"internal": {"lift_success_m": 0.1}}},
             "criterion.internal.lift_success_m",
         ),
         (
+            CARRY,
             {"criterion": {"placement": {"floor_arm": "reflection"}}},
             "criterion.placement.floor_arm",
         ),
-        ({"keep_labels": ["kept"]}, "keep_labels"),
-        ({"keep_labels": None}, "keep_requires_lift"),
-        ({"stages": {"lifted": "yes"}}, "stages"),
     ],
 )
-def test_the_task_block_is_checked_against_itself(extra, problem):
-    problems = task_block_problems(block(CARRY, CP, **extra), 60)
+def test_the_task_block_is_checked_against_itself(task, extra, problem):
+    problems = task_block_problems(block(task, SCHEDULES[task], **extra), 60)
     assert [p.split(":")[0] for p in problems] == [problem]
 
 
@@ -1378,9 +1618,12 @@ def test_scaled_search_timing_is_accepted_and_reported():
     assert record["timing_scale"] == {"search": 0.9, "approach": 1.1}
 
 
-def test_a_row_off_the_plan_is_refused():
+@pytest.mark.parametrize(
+    ("waypoint", "phase"), [(0, "hold"), (5, "approach"), (-1, "hold")]
+)
+def test_a_row_off_the_plan_is_refused(waypoint, phase):
     rows = ramp("lift_hold", LH, 0.15)
-    rows[10] = dict(rows[10], **{"robot.phase": "hold"})
+    rows[10] = dict(rows[10], **{"robot.waypoint": waypoint, "robot.phase": phase})
     with pytest.raises(Refused, match="phase_row"):
         score(rows, block("lift_hold", LH))
 
@@ -1435,27 +1678,28 @@ def lift_holds(n):
 
 
 def test_the_listing_must_describe_the_file(tmp_path):
-    write(
-        tmp_path,
-        [
-            episode("ep-0", ramp("lift_hold", LH, 0.15), block("lift_hold", LH)),
-            episode("ep-1", ramp("lift_hold", LH, 0.15), block("lift_hold", LH)),
-            episode("ep-2", ramp("lift_hold", LH, 0.15), block("lift_hold", LH)),
-        ],
-    )
+    write(tmp_path, lift_holds(5))
     path = tmp_path / "metadata.yaml"
     meta = yaml.safe_load(path.read_text())
     trajectories = [f for f in meta["files"] if f["kind"] == "trajectory"]
     trajectories[0]["n_steps"] += 1
     trajectories[1]["episode_uid"] = "ep-9"
+    trajectories[3]["path"] = "../" + trajectories[3]["path"]
+    trajectories[4]["path"] = str(tmp_path / trajectories[4]["path"])
     path.write_text(yaml.safe_dump(meta))
     (tmp_path / trajectories[2]["path"]).unlink()
-    _, records = scored(tmp_path)
-    assert [e["refused"] for e in records.values()] == [
-        "n_steps",
-        "unreadable",
-        "listing",
+    report, records = scored(tmp_path)
+    assert [(uid, e["refused"]) for uid, e in records.items()] == [
+        ("ep-0", "n_steps"),
+        ("ep-2", "unreadable"),
+        ("ep-3", "listing"),
+        ("ep-4", "listing"),
+        ("ep-9", "listing"),
     ]
+    assert records["ep-3"]["detail"] == (
+        "'../trajectories/apple/ep-3.parquet' is not a path under the root"
+    )
+    assert report["episodes"]["unlisted"] == 2
 
 
 def edit_footer(path, **changes):
@@ -1498,6 +1742,19 @@ def test_a_malformed_label_or_listing_refuses_its_episode_alone(tmp_path):
     assert run("pg-t1", root, "--json", tmp_path / "r.json") == 1
 
 
+def test_an_unlisted_file_alone_makes_the_run_incomplete(tmp_path):
+    root = tmp_path / "d"
+    write(root, lift_holds(1))
+    trajectory = root / "trajectories" / "apple"
+    (trajectory / "ep-1.parquet").write_bytes(
+        (trajectory / "ep-0.parquet").read_bytes()
+    )
+    report, _ = score_dataset(root)
+    assert (report["episodes"]["refused"], report["episodes"]["unlisted"]) == (0, 1)
+    assert report["status"] == "incomplete"
+    assert run("pg-t1", root, "--json", tmp_path / "r.json") == 1
+
+
 def test_a_dataset_without_metadata_cannot_be_scored(tmp_path):
     with pytest.raises(DatasetUnreadable):
         score_dataset(tmp_path)
@@ -1517,6 +1774,26 @@ def test_floor_arm_baselines_are_scored_apart(tmp_path):
     assert report["floor_arms"]["reflection"][CARRY]["overall"]["n"] == 1
     assert records["ep-1"]["floor_arm"] == "reflection"
     assert "floor arm reflection" in report_text(report)
+
+
+def test_the_table_states_the_population_it_scores(tmp_path):
+    every = {"keep_labels": None, "keep_requires_lift": False}
+    write(
+        tmp_path,
+        [
+            episode(
+                "ep-0", ramp("lift_hold", LH, 0.15), block("lift_hold", LH, **every)
+            ),
+            episode("ep-1", ramp("pick", PK, 0.15), block("pick", PK, **every)),
+            episode("ep-2", ramp("pick", PK, 0.15), block("pick", PK)),
+        ],
+    )
+    report = scored(tmp_path)[0]
+    assert report["tasks"]["lift_hold"]["population"]["keep_labels"] is None
+    assert report["tasks"]["pick"]["population"]["keep_labels"] == "mixed"
+    lines = printed(report)
+    assert "population every episode the generation run made" in lines
+    assert "population episodes kept under different rules" in lines
 
 
 def test_scores_are_pooled_over_object_types_and_given_per_type(tmp_path):
@@ -1544,20 +1821,59 @@ def test_scores_are_pooled_over_object_types_and_given_per_type(tmp_path):
 def test_the_task_score_is_taken_over_the_decidable_episodes(tmp_path):
     # Planned with a 100-row hold, B's window does not fit the second recording.
     short = [*LHP[:4], 100, *LHP[5:]]
+    shorter = episode("ep-1", put_back(schedule=short), block("lift_hold_place", short))
     write(
-        tmp_path,
-        [
-            episode("ep-0", put_back(), block("lift_hold_place", LHP)),
-            episode("ep-1", put_back(schedule=short), block("lift_hold_place", short)),
-        ],
+        tmp_path / "both",
+        [episode("ep-0", put_back(), block("lift_hold_place", LHP)), shorter],
     )
-    report, records = scored(tmp_path)
+    report, records = scored(tmp_path / "both")
     assert [records[u]["decidable"]["B"] for u in ("ep-0", "ep-1")] == [True, False]
     assert all(records[u]["placed_task"]["verdict"] for u in ("ep-0", "ep-1"))
     table = report["tasks"]["lift_hold_place"]["overall"]
     c, b = table["C"], table["B"]
     assert (b["lifted"]["of_all"], b["held"]["undecidable"]) == (1.0, 1)
     assert b["task_score"] == c["task_score"] == 1.0
+    # B's held: 1 of 1 attempted and 1 of the 1 decidable episode; C's: 2 of 2.
+    assert "held 1/1 1.000 [0.207, 1.000] 1/1 1.000 [0.207, 1.000]" in printed(report)
+    write(tmp_path / "short", [shorter])
+    b = scored(tmp_path / "short")[0]["tasks"]["lift_hold_place"]["overall"]["B"]
+    assert (b["task_score"], b["task_score_why_null"]) == (None, "no decidable episode")
+    assert b["headline"] is None
+
+
+def test_a_task_without_a_hold_reports_lifted_alone(tmp_path):
+    write(
+        tmp_path,
+        [
+            episode("ep-0", ramp("pick", PK, 0.15), block("pick", PK)),
+            episode("ep-1", ramp("pick", PK, 0.03), block("pick", PK)),
+        ],
+    )
+    report, records = scored(tmp_path)
+    assert (records["ep-0"]["stages"], records["ep-0"]["decidable"]) == (
+        ["lifted"],
+        None,
+    )
+    assert "held" not in records["ep-0"]["C"] and "placed" not in records["ep-0"]["B"]
+    for x in ("C", "B"):
+        cells = report["tasks"]["pick"]["overall"][x]
+        assert (cells["held"], cells["placed"], cells["task_score"]) == (
+            None,
+            None,
+            None,
+        )
+        assert cells["task_score_why_null"] == "no put-down planned"
+        assert (cells["headline"]["stage"], cells["headline"]["of_all"]) == (
+            "lifted",
+            0.5,
+        )
+        assert {k: v for k, v in cells["failures"]["counts"].items() if v} == {
+            "success": 1,
+            "not_lifted": 1,
+        }
+    lines = printed(report)
+    assert lines.count("held not planned not planned") == 2
+    assert lines.count("task score not planned") == 2
 
 
 # --- the check against the generator's verdicts ---------------------------------------------
@@ -1577,16 +1893,24 @@ def test_a_stored_agreement_record_is_compared_entry_by_entry(tmp_path):
     report, check = checked(rows, good, tmp_path / "good")
     assert check["exact"] == {"E1": True, "E2": True}
     assert check["explained"] == {"held": "other_hold_length"}
+    assert report["check"]["exact"]["E1"] == {"applied": 1, "failed": 0}
     assert report["status"] == "ok"
     wrong = block("search_lift_hold_2s", S2, agreement=dict(record, first_up_frame=250))
     report, check = checked(rows, wrong, tmp_path / "wrong")
     assert check["exact"] == {"E1": False}
     assert check["failures"] == ["E1 agreement.first_up_frame: stored 250, scored 249"]
+    assert report["check"]["exact"]["E1"] == {"applied": 1, "failed": 1}
     assert report["status"] == "check_failed"
     assert (
         "  ep-0          E1 agreement.first_up_frame: stored 250, scored 249"
         in report_text(report).splitlines()
     )
+    # The verdict alone, without the record, is compared too.
+    alone = block("search_lift_hold_2s", S2, stages={"agreement": False})
+    report, check = checked(rows, alone, tmp_path / "alone")
+    assert check["exact"] == {"E1": False}
+    assert check["failures"] == ["E1 stages.agreement: stored False, scored True"]
+    assert report["check"]["exact"]["E1"] == {"applied": 1, "failed": 1}
 
 
 def test_a_stored_lift_without_a_twelve_centimetre_crossing_fails_the_check(tmp_path):
@@ -1633,6 +1957,18 @@ def test_a_stored_lift_without_a_twelve_centimetre_crossing_fails_the_check(tmp_
             {"lifted": "retry_whole_recording", "held": "retry_whole_recording"},
         ),
         (
+            # The crossing is the last lift row, 269, itself.
+            at_heights(
+                ramp("search_lift_hold", S4, 0.0), lambda i: 0.04 if i < 269 else 0.16
+            ),
+            "search_lift_hold",
+            {"lifted": False, "held": None},
+            {
+                "lifted": "below_threshold_at_lift_end",
+                "held": "held_not_judged_by_generator",
+            },
+        ),
+        (
             put_back(),
             "lift_hold_place",
             {"lifted": True, "held": True, "placed": False},
@@ -1641,16 +1977,46 @@ def test_a_stored_lift_without_a_twelve_centimetre_crossing_fails_the_check(tmp_
     ],
 )
 def test_known_differences_are_explained(rows, task, stages, explained, tmp_path):
-    schedule = {
-        "search_lift_hold": S4,
-        "search_lift_hold_2s": S2,
-        "lift_hold_retry": RETRY,
-        "lift_hold_place": LHP,
-    }
-    report, check = checked(rows, block(task, schedule[task], stages=stages), tmp_path)
+    report, check = checked(rows, block(task, SCHEDULES[task], stages=stages), tmp_path)
     assert check["explained"] == explained
     assert check["failures"] == []
+    assert report["check"]["explained"] == dict(
+        sorted(Counter(explained.values()).items())
+    )
     assert report["status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    ("stages", "explained", "failure"),
+    [
+        (
+            {"lifted": False, "held": None, "carried": False, "placed": None},
+            {
+                "lifted": "below_threshold_at_lift_end",
+                "held": "held_not_judged_by_generator",
+                "placed": "generator_gate",
+            },
+            "stages.carried: stored False, scored True",
+        ),
+        (
+            {"lifted": None, "held": False},
+            {"lifted": "lift_not_reached"},
+            "stages.held: stored False, scored True",
+        ),
+    ],
+)
+def test_a_difference_no_rule_explains_fails_the_check(
+    stages, explained, failure, tmp_path
+):
+    root = tmp_path / "d"
+    report, check = checked(put_down(), block(CARRY, CP, stages=stages), root)
+    assert check["explained"] == explained
+    assert check["failures"] == [f"{failure}, a difference no rule explains"]
+    assert report["check"]["failures"] == [
+        {"episode_uid": "ep-0", "failures": check["failures"]}
+    ]
+    assert (report["check"]["result"], report["status"]) == ("failed", "check_failed")
+    assert run("pg-t1", root, "--json", tmp_path / "r.json") == 1
 
 
 def test_the_put_down_record_and_verdicts_are_exact(tmp_path):
@@ -1699,9 +2065,14 @@ def test_the_put_down_record_and_verdicts_are_exact(tmp_path):
         "carried": "generator_gate",
         "placed": "generator_gate",
     }
+    # A generator that gated the put-down stores it with carried and placed null.
+    place = dict(first["placed_task"]["facts"], carried=None, placed=None)
+    task = block(CARRY, CP, stages=gated, place=place)
+    report, check = checked(rows, task, tmp_path / "d")
+    assert check["exact"] == {"E4": True}
 
 
-def test_another_generator_threshold_takes_the_exact_lift_checks_away():
+def test_another_generator_threshold_takes_the_exact_lift_checks_away(tmp_path):
     rows = ramp("search_lift_hold", S4, 0.11)
     stages = {"lifted": True, "held": True}
     task = block("search_lift_hold", S4, stages=stages, judge={"lift_success_m": 0.10})
@@ -1711,6 +2082,15 @@ def test_another_generator_threshold_takes_the_exact_lift_checks_away():
         "lifted": "other_lift_threshold",
         "held": "other_lift_threshold",
     }
+    # Under the 4 s put-down too, E3 needs the generator's threshold at 12 cm.
+    stages = {"lifted": True, "held": False}
+    task = block(CARRY, CP, stages=stages, judge={"lift_success_m": 0.10})
+    report, check = checked(put_down(), task, tmp_path)
+    assert check["exact"] == {}
+    assert check["matched"] == ["lifted"]
+    assert check["explained"] == {"held": "other_lift_threshold"}
+    assert report["check"]["matched"] == 1
+    assert report["check"]["explained"] == {"other_lift_threshold": 1}
 
 
 # --- the command ----------------------------------------------------------------------------
