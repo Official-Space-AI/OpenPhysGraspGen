@@ -606,6 +606,13 @@ FRAME_REFUSALS = [
         },
         r"determinant is -1, not \+1",
     ),
+    (
+        lambda f: {
+            "camera.wrist.world_to_camera": world_to_camera(6, "wrist")
+            @ np.diag([1 + 1e-5, 1 + 1e-5, 1 + 1e-5, 1.0])
+        },
+        r"not orthonormal, \|R R\^T - I\| reaches 2e-05 \(at most 1e-06\)",
+    ),
 ]
 
 
@@ -1510,6 +1517,18 @@ def test_finalize_refuses_a_video_that_is_not_the_cameras(tmp_path, mp4, message
     write_episode(recorder, n_frames=4)
     recorder.files("apple", "ep-0").videos["wrist"].write_bytes(mp4)
     with pytest.raises(DatasetError, match=f"videos/wrist/apple/ep-0.mp4: {message}"):
+        recorder.finalize()
+
+
+@needs_av1
+def test_finalize_reports_metadata_that_does_not_describe_a_video(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec(channels=fmt.CHANNELS))
+    write_episode(recorder, n_frames=2)
+    _footers(tmp_path, lambda f: {**f, "fps": "30"})
+    with pytest.raises(
+        DatasetError,
+        match="videos/front/apple/ep-0.mp4: its metadata does not describe it: TypeError",
+    ):
         recorder.finalize()
 
 
