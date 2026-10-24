@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
 # SPDX-License-Identifier: Apache-2.0
-"""Write and read the public dataset format (``pip install "physgraspgen[dataset]"``).
+"""Write and read the public dataset format (``pip install "openphysgraspgen[dataset]"``).
 
 The format is documented in ``docs/dataset/format.md``.
 """

@@ -3,7 +3,7 @@
 Status: draft for review (format `physgraspgen-public`, version `2.0`).
 
 The project publishes a soft-body grasping dataset on the Hugging Face Hub under CC-BY-4.0, with a
-Zenodo DOI. This page defines its files. The `physgraspgen.dataset` module writes and reads them,
+Zenodo DOI. This page defines its files. The `openphysgraspgen.dataset` module writes and reads them,
 and the dataset's own check script tests them, so the writer, the reader and the check share one
 definition. Version 2.0 replaces an unpublished HDF5 draft (1.0) with Parquet and MP4.
 
@@ -181,12 +181,12 @@ with the criteria file and the script whose sha256 `metadata.yaml` lists.
 
 ## Writing and reading
 
-`pip install "physgraspgen[dataset]"` adds PyArrow and PyYAML. Writing RGB also needs an
+`pip install "openphysgraspgen[dataset]"` adds PyArrow and PyYAML. Writing RGB also needs an
 `ffmpeg` executable with the SVT-AV1 encoder on the `PATH`; reading every other channel
 needs only PyArrow.
 
 ```python
-from physgraspgen.dataset import DatasetSpec, GraspDataRecorder, read_frames
+from openphysgraspgen.dataset import DatasetSpec, GraspDataRecorder, read_frames
 
 spec = DatasetSpec(
     name="physgraspgen-dataset",

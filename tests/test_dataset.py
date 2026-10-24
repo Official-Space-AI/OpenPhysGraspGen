@@ -13,7 +13,7 @@ pytest.importorskip("yaml")
 
 import pyarrow.parquet as pq
 
-from physgraspgen.dataset import (
+from openphysgraspgen.dataset import (
     DatasetError,
     DatasetSpec,
     GraspDataRecorder,
@@ -24,7 +24,7 @@ from physgraspgen.dataset import (
     read_video,
     video_tracks,
 )
-from physgraspgen.dataset import check_dataset as fmt
+from openphysgraspgen.dataset import check_dataset as fmt
 
 H, W = 64, 64
 T = 5

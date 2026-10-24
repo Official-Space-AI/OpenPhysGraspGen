@@ -36,11 +36,11 @@ this repository. See [Scope of the open release](#scope-of-the-open-release).
 
 ## Install
 
-Python 3.10 or newer. The package is `physgraspgen` and is published on PyPI from
+Python 3.10 or newer. The package is `openphysgraspgen` and is published on PyPI from
 `1.0.0rc1`:
 
 ```bash
-pip install physgraspgen
+pip install openphysgraspgen
 ```
 
 Until that release, install from GitHub:
@@ -67,7 +67,7 @@ Run the end-to-end reference pipeline (calibration → transfer → data generat
 estimation → confidence gate) on a small synthetic problem:
 
 ```bash
-physgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
+openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 ```
 
 It prints a JSON summary with the calibrated and transferred parameters, the number
@@ -78,7 +78,7 @@ Evaluate a constitutive law directly:
 
 ```python
 import numpy as np
-from physgraspgen import YeohParams, cauchy_stress, von_mises_stress
+from openphysgraspgen import YeohParams, cauchy_stress, von_mises_stress
 
 silicone = YeohParams(c10=0.12e6, c20=0.01e6, c30=0.0, nu=0.45)
 F = np.diag([1.2, 0.92, 0.92])  # uniaxial stretch
@@ -89,7 +89,7 @@ print(von_mises_stress(sigma))  # about 1.4e5 Pa
 Record contact force labels from a Newton simulation:
 
 ```python
-from physgraspgen import DeformableContactSensor, SensorRecorder, SimFrame
+from openphysgraspgen import DeformableContactSensor, SensorRecorder, SimFrame
 
 recorder = SensorRecorder([DeformableContactSensor(contact_provenance="newton-vbd")])
 frame = SimFrame(
