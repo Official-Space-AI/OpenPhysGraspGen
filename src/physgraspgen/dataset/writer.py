@@ -8,7 +8,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 import numpy as np
 import pyarrow as pa
@@ -292,8 +292,41 @@ def _arrow(
     return pa.ListArray.from_arrays(pa.array(offsets), flat)
 
 
+def _claim(files: EpisodeFiles, uid: str, overwrite: bool) -> IO[bytes]:
+    """Create the episode's frames .part file, which only one writer can create."""
+    targets = [files.frames, files.trajectory, *files.videos.values()]
+    for path in targets:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    claim = _part(files.frames)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(claim, flags, 0o666)
+    except FileExistsError:
+        if not overwrite:
+            raise FileExistsError(
+                f"episode {uid} is being written, or its writer stopped without "
+                f"removing {claim}; overwrite=True replaces it"
+            ) from None
+        claim.unlink(missing_ok=True)
+        fd = os.open(claim, flags, 0o666)
+    stream = os.fdopen(fd, "wb")
+    existing = [p for p in targets if p.exists()]
+    if existing and not overwrite:
+        stream.close()
+        claim.unlink()
+        raise FileExistsError(f"episode {uid} is already written: {existing[0]}")
+    # Holding the claim, any other .part file of the episode is a leftover.
+    for path in targets[1:]:
+        _part(path).unlink(missing_ok=True)
+    return stream
+
+
 class EpisodeWriter:
-    """Writes one episode: call add_frame and add_step in order, then close."""
+    """Writes one episode: call add_frame and add_step in order, then close.
+
+    The writer claims the episode by creating its frames .part file, so a second writer
+    of the same episode is refused until this one closes or aborts.
+    """
 
     def __init__(
         self,
@@ -311,20 +344,6 @@ class EpisodeWriter:
         self.files = episode_files(
             root, info["object_type"], info["episode_uid"], spec.video_cameras
         )
-        targets = [
-            self.files.frames,
-            self.files.trajectory,
-            *self.files.videos.values(),
-        ]
-        existing = [p for p in targets if p.exists() or _part(p).exists()]
-        if existing and not overwrite:
-            raise FileExistsError(
-                f"episode {info['episode_uid']} is already written: {existing[0]}"
-            )
-        for path in targets:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            _part(path).unlink(missing_ok=True)
-
         self._columns = fmt.frame_columns(spec.channels, spec.cameras)
         self._schema = frame_schema(spec)
         self._options = _writer_options(self._schema, spec)
@@ -365,6 +384,9 @@ class EpisodeWriter:
             else None
         )
         self._done = False
+        self._claim = _claim(self.files, info["episode_uid"], overwrite)
+        stat = os.fstat(self._claim.fileno())
+        self._claim_id = (stat.st_dev, stat.st_ino)
 
     def __enter__(self) -> Self:
         return self
@@ -380,6 +402,19 @@ class EpisodeWriter:
     @property
     def n_frames(self) -> int:
         return len(self._frame_steps)
+
+    def _owns_claim(self) -> bool:
+        try:
+            stat = os.stat(_part(self.files.frames))
+        except FileNotFoundError:
+            return False
+        return (stat.st_dev, stat.st_ino) == self._claim_id
+
+    def _check_claim(self) -> None:
+        if not self._owns_claim():
+            raise RuntimeError(
+                f"another writer took episode {self.info['episode_uid']} over"
+            )
 
     def _expected_shape(self, name: str, shape: object) -> tuple[int, ...] | None:
         if shape == ():
@@ -592,9 +627,7 @@ class EpisodeWriter:
                 )
         table = pa.Table.from_arrays(arrays, schema=self._schema)
         if self._writer is None:
-            self._writer = pq.ParquetWriter(
-                _part(self.files.frames), self._schema, **self._options
-            )
+            self._writer = pq.ParquetWriter(self._claim, self._schema, **self._options)
         self._writer.write_table(table, row_group_size=n)
         for values in self._buffer.values():
             values.clear()
@@ -659,12 +692,14 @@ class EpisodeWriter:
                 raise ValueError(
                     f"the trajectory lacks frame steps, first {unrecorded[0]}"
                 )
+            self._check_claim()
             self._flush()
             metadata = self._metadata()
             assert self._writer is not None
             self._writer.add_key_value_metadata(metadata)
             self._writer.close()
             self._writer = None
+            self._claim.close()
             _check_encodings(_part(self.files.frames), self._options)
             trajectory = pa.Table.from_pylist(
                 self._steps, schema=self._trajectory_schema
@@ -677,13 +712,15 @@ class EpisodeWriter:
                 writer.add_key_value_metadata(metadata)
             for encoder in self._encoders.values():
                 encoder.close()
+            self._check_claim()
         except BaseException:
             self.abort()
             raise
+        # The frames file goes last: until it is renamed, the episode stays claimed.
         for path in (
-            self.files.frames,
             self.files.trajectory,
             *self.files.videos.values(),
+            self.files.frames,
         ):
             os.replace(_part(path), path)
         self._done = True
@@ -696,18 +733,26 @@ class EpisodeWriter:
         )
 
     def abort(self) -> None:
-        """Stop without writing; nothing of the episode is left on disk."""
+        """Stop without writing; nothing of the episode is left on disk.
+
+        A writer whose episode another writer took over (overwrite=True) leaves the
+        files alone.
+        """
         self._done = True
         if self._writer is not None:
             with contextlib.suppress(OSError, pa.ArrowException):
                 self._writer.close()
             self._writer = None
+        with contextlib.suppress(OSError):
+            self._claim.close()
         for encoder in self._encoders.values():
             encoder.abort()
+        if not self._owns_claim():
+            return
         for path in (
-            self.files.frames,
             self.files.trajectory,
             *self.files.videos.values(),
+            self.files.frames,
         ):
             _part(path).unlink(missing_ok=True)
 

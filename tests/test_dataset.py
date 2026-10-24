@@ -738,6 +738,51 @@ def test_an_episode_is_not_written_twice(tmp_path):
         write_episode(recorder)
     write_episode(recorder, overwrite=True, label="fail")
     assert episode_metadata(recorder.files("apple", "ep-0").frames)["label"] == "fail"
+    assert not list(tmp_path.rglob("*.part"))
+
+
+def test_two_writers_cannot_write_one_episode(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    first = open_episode(recorder)
+    with pytest.raises(FileExistsError, match="ep-0 is being written"):
+        open_episode(recorder)
+    fill(first)
+    first.close()
+    with pytest.raises(FileExistsError, match="already written"):
+        open_episode(recorder)
+
+
+def test_a_leftover_part_file_is_reported_and_overwrite_replaces_it(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    files = recorder.files("apple", "ep-0")
+    for path in (files.frames, files.trajectory):
+        path.parent.mkdir(parents=True)
+        path.with_name(path.name + ".part").write_bytes(b"left by a crash")
+    with pytest.raises(FileExistsError, match="overwrite=True replaces it"):
+        open_episode(recorder)
+    write_episode(recorder, overwrite=True)
+    assert files_under(tmp_path) == [
+        "data/apple/ep-0.parquet",
+        "trajectories/apple/ep-0.parquet",
+    ]
+    assert read_frames(files.frames)["sim_step"].tolist() == [2, 4, 6, 8, 10]
+
+
+def test_a_writer_whose_episode_was_taken_over_leaves_it_alone(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    old = open_episode(recorder, label="fail")
+    new = open_episode(recorder, overwrite=True)
+    fill(old)
+    with pytest.raises(RuntimeError, match="another writer took episode ep-0 over"):
+        old.close()
+    fill(new)
+    new.close()
+    files = recorder.files("apple", "ep-0")
+    assert episode_metadata(files.frames)["label"] == "success"
+    assert files_under(tmp_path) == [
+        "data/apple/ep-0.parquet",
+        "trajectories/apple/ep-0.parquet",
+    ]
 
 
 # --- finalize --------------------------------------------------------------------
