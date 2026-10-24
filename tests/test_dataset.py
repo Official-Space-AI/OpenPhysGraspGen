@@ -1209,6 +1209,54 @@ FINALIZE_REFUSALS = [
         "its metadata does not describe its columns: KeyError",
     ),
     (
+        lambda root: _footers(root, lambda f: {**f, "label": "won"}),
+        "data/apple/ep-0.parquet: its label 'won' is not one of",
+    ),
+    (
+        lambda root: _footers(root, lambda f: {**f, "n_tets": "5"}),
+        "data/apple/ep-0.parquet: its n_tets is not a positive integer: '5'",
+    ),
+    (
+        lambda root: _footers(root, lambda f: {**f, "n_steps": 0}),
+        "data/apple/ep-0.parquet: its n_steps is not a positive integer: 0",
+    ),
+    (
+        lambda root: _footers(root, lambda f: {**f, "fps": True}),
+        "data/apple/ep-0.parquet: its fps is not a positive integer: True",
+    ),
+    (
+        lambda root: _footers(root, lambda f: {**f, "fps": 7}),
+        "data/apple/ep-0.parquet: its fps 7 does not divide its recorded_fps",
+    ),
+    (
+        lambda root: _footers(root, lambda f: {**f, "ffmpeg_version": "ffmpeg 8"}),
+        "data/apple/ep-0.parquet: without rgb, its video and ffmpeg_version must be null",
+    ),
+    (
+        lambda root: _footers(
+            root,
+            lambda f: {
+                **f,
+                "channels": ["rgb", *f["channels"]],
+                "video": VideoSpec().record(),
+                "ffmpeg_version": None,
+            },
+        ),
+        "with rgb, its video must be a mapping and its ffmpeg_version a string",
+    ),
+    (
+        lambda root: _footers(
+            root,
+            lambda f: {
+                **f,
+                "channels": ["rgb", *f["channels"]],
+                "video": "av1",
+                "ffmpeg_version": "ffmpeg 8",
+            },
+        ),
+        "data/apple/ep-0.parquet: with rgb, its video must be a mapping",
+    ),
+    (
         lambda root: rewrite(root / "data/apple/ep-0.parquet", lambda t, f: (t, [f])),
         "data/apple/ep-0.parquet: its physgraspgen metadata is not a mapping",
     ),
@@ -1562,12 +1610,14 @@ def test_finalize_refuses_a_video_that_is_not_the_cameras(tmp_path, mp4, message
 
 @needs_av1
 def test_finalize_reports_metadata_that_does_not_describe_a_video(tmp_path):
-    recorder = GraspDataRecorder(tmp_path, make_spec(channels=fmt.CHANNELS))
+    # Without depth and masks, only the videos read the image size.
+    channels = ("rgb", "force", "stress", "deformation_gradient")
+    recorder = GraspDataRecorder(tmp_path, make_spec(channels=channels))
     write_episode(recorder, n_frames=2)
-    _footers(tmp_path, lambda f: {**f, "fps": "30"})
+    _footers(tmp_path, lambda f: {**f, "image_size": {}})
     with pytest.raises(
         DatasetError,
-        match="videos/front/apple/ep-0.mp4: its metadata does not describe it: TypeError",
+        match="videos/front/apple/ep-0.mp4: its metadata does not describe it: KeyError",
     ):
         recorder.finalize()
 

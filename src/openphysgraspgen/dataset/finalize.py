@@ -199,10 +199,27 @@ def _episode_error(rel: str, meta: dict[str, Any]) -> str | None:
         return f"{rel} holds episode {meta['episode_uid']} of {meta['object_type']}"
     if not isinstance(meta["object_asset"], str) or not meta["object_asset"]:
         return f"{rel}: its object_asset is not a nonempty string"
+    if meta["label"] not in fmt.LABELS:
+        return f"{rel}: its label {meta['label']!r} is not one of {list(fmt.LABELS)}"
+    for key in ("n_frames", "n_steps", "n_tets", "fps", "recorded_fps"):
+        if type(meta[key]) is not int or meta[key] < 1:
+            return f"{rel}: its {key} is not a positive integer: {meta[key]!r}"
+    if meta["recorded_fps"] % meta["fps"]:
+        return f"{rel}: its fps {meta['fps']} does not divide its recorded_fps"
     try:
         _frame_schema(meta)
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         return f"{rel}: its metadata does not describe its columns: {exc!r}"
+    if "rgb" in meta["channels"]:
+        if not isinstance(meta["video"], dict) or not isinstance(
+            meta["ffmpeg_version"], str
+        ):
+            return (
+                f"{rel}: with rgb, its video must be a mapping and its ffmpeg_version "
+                "a string"
+            )
+    elif meta["video"] is not None or meta["ffmpeg_version"] is not None:
+        return f"{rel}: without rgb, its video and ffmpeg_version must be null"
     problem = fmt.facts_error(meta["facts"])
     if problem:
         return f"{rel}: {problem}"

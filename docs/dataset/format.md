@@ -255,11 +255,15 @@ or ignore them.
 It writes `metadata.yaml`, `SHA256SUMS` and `.gitattributes`, and writes none of them when it
 refuses the dataset. It refuses it when:
 
+- the root holds no episode;
 - a file under the root is not part of the layout (an interrupted episode leaves `.part` files),
   or an episode's file is missing, or a file belongs to no episode;
 - an episode's metadata is not a mapping, is not `physgraspgen-public` 2.0, lacks a key, names
   another episode or object type than its path, has an `object_asset` that is not a nonempty
-  string, does not describe its columns, or lacks a kind of `facts`;
+  string, a `label` the format does not list, an `n_frames`, `n_steps`, `n_tets`, `fps` or
+  `recorded_fps` that is not a positive integer, or an `fps` that does not divide `recorded_fps`,
+  does not describe its columns, has a `video` and an `ffmpeg_version` that are not a mapping and
+  a string with `rgb` and null without it, or lacks a kind of `facts`;
 - one episode id is under two object types;
 - episodes disagree on a key that every episode must state alike (see Episode metadata);
 - two object types are one after lower-casing and stripping (`apple`, `Apple`), or one
@@ -272,11 +276,12 @@ refuses the dataset. It refuses it when:
 - a video differs from the Videos table, read from its index;
 - `doi` or `download_url` is not of the form given in the metadata.yaml table.
 
-It reads each Parquet file in full and parses each video's index, then hashes the file, in
-`workers` threads. The `.part` files that a stopped finalize leaves at the root are replaced, not
-refused. `.gitattributes` marks `metadata.yaml`, `SHA256SUMS` and `tools/**` as `-text`, so that a
-git checkout keeps the bytes that are hashed whatever its line-ending settings, and sends
-`*.parquet` and `*.mp4` through Git LFS, as the Hub stores them.
+It reads each Parquet file in full and parses each video's index, then hashes the file, in `workers`
+threads. The `.part` files that a stopped finalize leaves at the root are replaced, not refused, and
+the `.git/` and `.cache/` folders at the root, which a clone of the Hub's repository and
+`hf download --local-dir` create, are skipped. `.gitattributes` marks `metadata.yaml`, `SHA256SUMS`
+and `tools/**` as `-text`, so that a git checkout keeps the bytes that are hashed whatever its
+line-ending settings, and sends `*.parquet` and `*.mp4` through Git LFS, as the Hub stores them.
 
 ## Conventions
 
