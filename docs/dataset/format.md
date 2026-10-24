@@ -341,7 +341,9 @@ python -I tools/check_dataset.py . --seed 20261116 --json report.json --workers 
 
 `-I` keeps the interpreter from importing from the working directory or `PYTHONPATH`, and the
 script drops its own folder from the path, so no file beside it in `tools/` can stand in for a
-module it imports.
+module it imports. `-I` also leaves out packages installed with `pip install --user`: install
+NumPy, PyArrow and PyYAML in a virtual environment or in the interpreter's own site-packages, or
+run the script without `-I`, since it drops its own folder from the path either way.
 
 | Option | Meaning |
 |---|---|

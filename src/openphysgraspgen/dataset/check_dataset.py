@@ -1384,14 +1384,25 @@ def validate_criteria(
                 )
 
 
+def _required(exc: ImportError) -> str:
+    """Why the check cannot run without a package it imports."""
+    reason = (
+        "NumPy, PyArrow and PyYAML are required: pip install numpy pyarrow pyyaml "
+        f"({exc})"
+    )
+    if sys.flags.no_user_site:
+        reason += (
+            "; python -I and -s leave out packages that pip install --user installed: "
+            "install them in a virtual environment, or run the script without -I or -s"
+        )
+    return reason
+
+
 def _yaml() -> Any:
     try:
         import yaml
     except ImportError as exc:
-        raise CheckError(
-            "NumPy, PyArrow and PyYAML are required: pip install numpy pyarrow pyyaml "
-            f"({exc})"
-        ) from None
+        raise CheckError(_required(exc)) from None
     return yaml
 
 
@@ -4422,10 +4433,7 @@ def check_environment() -> None:
     """Refuse a run without NumPy, PyArrow and PyYAML, or with one older than the tests
     cover."""
     if _IMPORT_ERROR is not None:
-        raise CheckError(
-            "NumPy, PyArrow and PyYAML are required: pip install numpy pyarrow pyyaml "
-            f"({_IMPORT_ERROR})"
-        )
+        raise CheckError(_required(_IMPORT_ERROR))
     versions = {"NumPy": np.__version__, "PyArrow": pa.__version__}
     versions["PyYAML"] = _yaml().__version__
     for name, floor in MIN_VERSIONS:

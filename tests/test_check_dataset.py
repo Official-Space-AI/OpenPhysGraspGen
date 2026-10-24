@@ -820,6 +820,26 @@ def test_the_environment_is_checked(monkeypatch):
         fmt.check_environment()
 
 
+def test_a_missing_package_names_what_python_leaves_out(root, tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    env = {"PYTHONPATH": str(empty), "PATH": ""}
+    required = (
+        "NumPy, PyArrow and PyYAML are required: pip install numpy pyarrow pyyaml "
+        "(No module named 'numpy')"
+    )
+    code, _, _, payload = run(root, root, "--seed", SEED, flags=("-S",), env=env)
+    assert (code, payload["reason"]) == (2, required)
+    # -s, which -I implies, leaves out the packages pip install --user installed.
+    code, _, _, payload = run(root, root, "--seed", SEED, flags=("-s", "-S"), env=env)
+    assert (code, payload["reason"]) == (
+        2,
+        required + "; python -I and -s leave out packages that pip install --user "
+        "installed: install them in a virtual environment, or run the script without "
+        "-I or -s",
+    )
+
+
 # --- the files the check finds ------------------------------------------------------
 
 
