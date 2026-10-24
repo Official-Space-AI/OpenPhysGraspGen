@@ -1517,6 +1517,7 @@ def test_finalize_refuses_object_types_that_differ_in_case(tmp_path):
     [
         ("https://doi.org/10.5281/zenodo.1234567", None, "doi must be a bare DOI"),
         ("zenodo.1234567", None, "doi must be a bare DOI"),
+        ("10.1000.10/abc", None, "registrant code of 4 to 9 digits"),
         (None, "http://example.org/dataset", "download_url must be an https:// URL"),
         (None, "https://", "download_url must be an https:// URL"),
     ],

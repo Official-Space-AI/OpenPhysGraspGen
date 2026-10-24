@@ -249,7 +249,7 @@ or ignore them.
 | Key | Meaning |
 |---|---|
 | `format`, `format_version`, `name`, `version` | format and dataset identity |
-| `license`, `doi`, `download_url` | CC-BY-4.0; the Zenodo DOI as a bare DOI, `10.<registrant>/<suffix>` without `https://doi.org/`; the download page, an `https://` URL. `doi` and `download_url` are null until given |
+| `license`, `doi`, `download_url` | CC-BY-4.0; the Zenodo DOI as a bare DOI, `10.<registrant>/<suffix>` with a registrant code of 4 to 9 digits, without `https://doi.org/`; the download page, an `https://` URL. `doi` and `download_url` are null until given |
 | `created` | when the file was written (UTC) |
 | `fps`, `recorded_fps`, `channels`, `cameras` | as in every episode |
 | `image_size` | per camera: `height`, `width` |

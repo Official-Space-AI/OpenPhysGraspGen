@@ -135,8 +135,8 @@ def finalize_dataset(
     rule applied, and every video's index read, in `workers` threads; then each file is
     hashed. tools/check_dataset.py is the package's check_dataset.py byte for byte, and
     tools/check_criteria.yaml the packaged acceptance values, or the file criteria names.
-    doi is a bare DOI (10.<registrant>/<suffix>) and download_url an https URL. Nothing
-    is written when the dataset is refused.
+    doi is a bare DOI (10.<registrant>/<suffix>, a registrant code of 4 to 9 digits)
+    and download_url an https URL. Nothing is written when the dataset is refused.
     """
     root = Path(root)
     errors: list[str] = []
@@ -144,7 +144,8 @@ def finalize_dataset(
         isinstance(doi, str) and fmt.DOI_PATTERN.fullmatch(doi)
     ):
         errors.append(
-            f"doi must be a bare DOI, 10.<registrant>/<suffix> without a URL: {doi!r}"
+            "doi must be a bare DOI, 10.<registrant>/<suffix> with a registrant code "
+            f"of 4 to 9 digits and no URL: {doi!r}"
         )
     if download_url is not None and not (
         isinstance(download_url, str) and fmt.URL_PATTERN.fullmatch(download_url)

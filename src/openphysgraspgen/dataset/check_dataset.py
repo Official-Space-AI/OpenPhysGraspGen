@@ -154,8 +154,9 @@ RESERVED_NAMES = frozenset(
     + tuple(f"com{i}" for i in range(1, 10))
     + tuple(f"lpt{i}" for i in range(1, 10))
 )
-# metadata.yaml's doi is a bare DOI and its download_url an https URL, in ASCII.
-DOI_PATTERN = re.compile(r"10\.[0-9]{4,9}(?:\.[0-9]+)*/[!-~]+")
+# metadata.yaml's doi is a bare DOI whose registrant code is 4 to 9 digits, as Zenodo's
+# is, and its download_url an https URL, in printable ASCII.
+DOI_PATTERN = re.compile(r"10\.[0-9]{4,9}/[!-~]+")
 URL_PATTERN = re.compile(r"https://[!-~]+")
 
 # A column is (dtype, shape). The shape is () for one value, a tuple of sizes for a

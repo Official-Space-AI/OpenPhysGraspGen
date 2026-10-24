@@ -2093,7 +2093,7 @@ def test_mismatches_of_an_unread_file_hold_no_none(root):
     ("doi", "ok"),
     [
         ("10.5281/zenodo.1234567", True),
-        ("10.1000.10/abc", True),
+        ("10.1000.10/abc", False),
         ("10.123/x", False),
         ("10.1234567890/x", False),
         ("doi:10.5281/x", False),
