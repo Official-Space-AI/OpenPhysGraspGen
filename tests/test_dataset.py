@@ -666,10 +666,11 @@ STEP_REFUSALS = [
     ({"robot.grip_contact_width_m": -np.inf}, "must be finite or NaN"),
     ({"force.gripper_force_mag": np.nan}, "force.gripper_force_mag must be finite"),
     ({"force.ground_force_mag": None}, "force.ground_force_mag must be finite"),
-    # Where finite is false, only the object's state is NaN.
+    # Where finite is false, the object's state is NaN and the reached state and force
+    # may be; commands and setpoints stay finite, and infinity is never allowed.
     (
-        {**NON_FINITE, **dict.fromkeys(FORCE_MAGNITUDES)},
-        "force.gripper_force_mag must be finite",
+        {**NON_FINITE, "force.gripper_force_mag": np.inf},
+        "force.gripper_force_mag must be finite or NaN",
     ),
     (
         {**NON_FINITE, "robot.ee_pose_cmd": np.full(7, np.nan)},
@@ -732,6 +733,38 @@ def test_a_non_finite_step_holds_nan_object_state(tmp_path):
     assert np.isnan(read_frames(files.frames)["robot.grip_contact_width_m"]).all()
     meta = episode_metadata(files.trajectory)
     assert meta["n_steps"] == meta["source_n_frames"] == 3
+
+
+def test_a_blown_up_step_may_lack_the_reached_state_and_force(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    unstable = {name: None for name in fmt.UNSTABLE_MAY_BE_NAN}
+    with open_episode(recorder, source_n_frames=3) as episode:
+        episode.add_frame(make_frame(2, recorder.spec))
+        episode.add_step(make_step(1))
+        episode.add_step(make_step(2))
+        with pytest.raises(ValueError, match="robot.ee_pose_cmd must be finite"):
+            episode.add_step(
+                {**make_step(3, finite=False), **unstable, "robot.ee_pose_cmd": None}
+            )
+        with pytest.raises(ValueError, match="robot.arm_q must be finite or NaN"):
+            episode.add_step(
+                {**make_step(3, finite=False), "robot.arm_q": np.full(6, np.inf)}
+            )
+        episode.add_step({**make_step(3, finite=False), **unstable})
+    trajectory = read_trajectory(recorder.files("apple", "ep-0").trajectory)
+    for name in fmt.UNSTABLE_MAY_BE_NAN:
+        assert np.isnan(trajectory[name][2]).all(), name
+        assert np.isfinite(trajectory[name][:2]).all(), name
+
+
+def test_the_reached_state_must_be_finite_on_a_finite_step(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    with open_episode(recorder) as episode:
+        episode.add_frame(make_frame(2, recorder.spec))
+        episode.add_step(make_step(1))
+        with pytest.raises(ValueError, match="robot.ee_pose must be finite"):
+            episode.add_step({**make_step(2), "robot.ee_pose": None})
+        episode.abort()
 
 
 @pytest.mark.parametrize(

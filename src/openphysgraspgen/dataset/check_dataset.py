@@ -191,6 +191,15 @@ FINITE_GROUPS = ("robot", "object", "camera", "force", "deformation_gradient")
 MAY_BE_NAN = ("robot.grip_contact_width_m",)
 # In the trajectory, NaN exactly where finite is false.
 NOT_FINITE_COLUMNS = ("object.centroid", "object.bbox_min", "object.bbox_max")
+# Reached robot state and force magnitudes that may also be NaN on such a step: the
+# simulation can break down before they are recorded. Commands and setpoints may not.
+UNSTABLE_MAY_BE_NAN = (
+    "robot.ee_pose",
+    "robot.arm_q",
+    "robot.gripper_width_m",
+    "force.gripper_force_mag",
+    "force.ground_force_mag",
+)
 # How far a world-to-camera rotation may be from orthonormal with determinant +1.
 RIGID_TOLERANCE = 1e-6
 
@@ -411,14 +420,18 @@ def trajectory_row_error(row: Mapping[str, object], previous: int | None) -> str
         )
     finite = bool(row["finite"])
     for name, value in row.items():
-        if name not in NOT_FINITE_COLUMNS:
+        if name in NOT_FINITE_COLUMNS:
+            if finite and not np.isfinite(value).all():
+                return f"{name} must be finite where finite is true"
+            if not finite and not np.isnan(value).all():
+                return f"{name} must be NaN where finite is false"
+        elif not finite and name in UNSTABLE_MAY_BE_NAN:
+            if np.isinf(np.asarray(value, dtype=np.float64)).any():
+                return f"{name} must be finite or NaN where finite is false"
+        else:
             problem = finite_error(name, value)
             if problem:
                 return f"{name} {problem}"
-        elif finite and not np.isfinite(value).all():
-            return f"{name} must be finite where finite is true"
-        elif not finite and not np.isnan(value).all():
-            return f"{name} must be NaN where finite is false"
     return None
 
 

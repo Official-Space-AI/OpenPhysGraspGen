@@ -516,8 +516,9 @@ class EpisodeWriter:
         """One row of the trajectory: every recorded step from step 1, in order.
 
         object.centroid, object.bbox_min and object.bbox_max are NaN, or None, exactly
-        where finite is false, and robot.grip_contact_width_m may be; every other float
-        value is finite.
+        where finite is false; there the reached robot state and the force magnitudes may
+        be NaN too. robot.grip_contact_width_m may be NaN; every other float value is
+        finite.
         """
         if self._done:
             raise RuntimeError("the episode is closed")

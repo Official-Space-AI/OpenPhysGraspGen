@@ -167,11 +167,14 @@ frame's step. It holds what benchmark scoring and control learning read, and no 
 
 - `object.centroid`, `object.bbox_min` and `object.bbox_max` are NaN in every element exactly
   where `finite` is false, and finite where it is true.
+- Where `finite` is false, the reached robot state (`robot.ee_pose`, `robot.arm_q`,
+  `robot.gripper_width_m`) and the two force magnitudes may also be NaN, because a simulation can
+  break down before they are recorded. Commands and setpoints stay finite.
 - `robot.grip_contact_width_m` is finite or NaN, and every other float value is finite.
 
-A step that breaks these rules, such as the step at which a simulation blew up if it has no force
-values, cannot be written. The rows are consecutive, so the trajectory then ends at the step before
-it, and `n_steps` is less than `source_n_frames`.
+So the step at which a simulation blew up can be written, and the trajectory keeps every
+recorded step: `n_steps` equals `source_n_frames` unless the generator lost steps. A step that
+breaks these rules cannot be written.
 
 ## Episode metadata
 
