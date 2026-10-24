@@ -338,4 +338,5 @@ complete, the frames file last. The writer claims the episode by creating its fr
 which only one writer can create, so a second writer of the episode is refused, and so is a writer
 after one that stopped without removing its `.part` files. `overwrite=True` replaces a written
 episode or a leftover `.part` file; a writer whose episode another writer took over that way
-renames and removes nothing. Every Parquet page is written with a checksum.
+raises an error, and neither removes nor publishes the other writer's files. Every Parquet page is
+written with a checksum.

@@ -3,11 +3,13 @@
 import copy
 import hashlib
 import json
+import os
 import re
 import shutil
 import struct
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -34,6 +36,7 @@ from physgraspgen.dataset import (
 )
 from physgraspgen.dataset import check_dataset as fmt
 from physgraspgen.dataset import video as video_module
+from physgraspgen.dataset import writer as writer_module
 
 # A non-square image, so that a swapped width and height cannot pass.
 H, W = 64, 96
@@ -870,6 +873,18 @@ def test_a_leftover_part_file_is_reported_and_overwrite_replaces_it(tmp_path):
     assert read_frames(files.frames)["sim_step"].tolist() == [2, 4, 6, 8, 10]
 
 
+def test_claiming_an_episode_removes_its_leftover_part_files(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    trajectory = recorder.files("apple", "ep-0").trajectory
+    stale = trajectory.with_name(trajectory.name + ".part")
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"left by a crash")
+    episode = open_episode(recorder)
+    assert not stale.exists()
+    episode.abort()
+    assert files_under(tmp_path) == []
+
+
 def test_a_writer_whose_episode_was_taken_over_leaves_it_alone(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     old = open_episode(recorder, label="fail")
@@ -885,6 +900,36 @@ def test_a_writer_whose_episode_was_taken_over_leaves_it_alone(tmp_path):
         "data/apple/ep-0.parquet",
         "trajectories/apple/ep-0.parquet",
     ]
+
+
+@pytest.mark.parametrize("renaming", ["trajectories", "data"])
+def test_a_writer_taken_over_while_renaming_publishes_no_file_of_the_other(
+    tmp_path, monkeypatch, renaming
+):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    old = open_episode(recorder, label="fail")
+    fill(old)
+    taker = []
+    replace = os.replace
+
+    def take_over_first(src, dst):
+        if Path(src).parts[-3] == renaming and not taker:
+            taker.append(open_episode(recorder, overwrite=True))
+        replace(src, dst)
+
+    monkeypatch.setattr(writer_module.os, "replace", take_over_first)
+    with pytest.raises(RuntimeError, match="another writer took episode ep-0 over"):
+        old.close()
+    monkeypatch.undo()
+    (new,) = taker
+    fill(new)
+    files = new.close()
+    assert episode_metadata(files.frames)["label"] == "success"
+    assert files_under(tmp_path) == [
+        "data/apple/ep-0.parquet",
+        "trajectories/apple/ep-0.parquet",
+    ]
+    recorder.finalize()
 
 
 # --- finalize --------------------------------------------------------------------

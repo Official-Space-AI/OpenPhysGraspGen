@@ -128,6 +128,14 @@ def _part(path: Path) -> Path:
     return path.with_name(path.name + ".part")
 
 
+def _file_id(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return stat.st_dev, stat.st_ino
+
+
 def _leaves(schema: pa.Schema) -> list[tuple[str, str]]:
     """The Parquet leaf columns of a schema: (path, physical type)."""
     sink = pa.BufferOutputStream()
@@ -362,15 +370,16 @@ class EpisodeWriter:
     def n_frames(self) -> int:
         return len(self._frame_steps)
 
-    def _owns_claim(self) -> bool:
-        try:
-            stat = os.stat(_part(self.files.frames))
-        except FileNotFoundError:
-            return False
-        return (stat.st_dev, stat.st_ino) == self._claim_id
+    def _owns_claim(self, path: Path | None = None) -> bool:
+        """Whether path, the frames .part file by default, is this writer's claim.
 
-    def _check_claim(self) -> None:
-        if not self._owns_claim():
+        On POSIX the claim stays open until this is no longer asked, so that its file
+        id cannot be given to another file.
+        """
+        return _file_id(path or _part(self.files.frames)) == self._claim_id
+
+    def _check_claim(self, path: Path | None = None) -> None:
+        if not self._owns_claim(path):
             raise RuntimeError(
                 f"another writer took episode {self.info['episode_uid']} over"
             )
@@ -626,7 +635,10 @@ class EpisodeWriter:
             self._writer.add_key_value_metadata(metadata)
             self._writer.close()
             self._writer = None
-            self._claim.close()
+            self._claim.flush()
+            if os.name == "nt":
+                # Windows renames no open file, and does not soon reuse a file id.
+                self._claim.close()
             _check_encodings(_part(self.files.frames), self._options)
             trajectory = pa.Table.from_pylist(
                 self._steps, schema=self._trajectory_schema
@@ -648,14 +660,12 @@ class EpisodeWriter:
         except BaseException:
             self.abort()
             raise
-        # The frames file goes last: until it is renamed, the episode stays claimed.
-        for path in (
-            self.files.trajectory,
-            *self.files.videos.values(),
-            self.files.frames,
-        ):
-            os.replace(_part(path), path)
+        # If a rename fails, the episode stays claimed and its .part files tell why.
         self._done = True
+        try:
+            self._publish()
+        finally:
+            self._claim.close()
         return EpisodeFiles(
             self.files.frames,
             self.files.trajectory,
@@ -663,6 +673,27 @@ class EpisodeWriter:
             self.n_frames,
             len(self._steps),
         )
+
+    def _publish(self) -> None:
+        """Rename the files into place, the frames file last and only while it is this
+        writer's claim: until it is renamed, the episode stays claimed."""
+        claim = _part(self.files.frames)
+        # No other writer uses this name, so the file found there cannot change.
+        mine = claim.with_name(f"{claim.name}.{os.urandom(4).hex()}")
+        try:
+            for path in (self.files.trajectory, *self.files.videos.values()):
+                os.replace(_part(path), path)
+            os.replace(claim, mine)
+        except FileNotFoundError:
+            # A writer that takes the episode over removes its other .part files.
+            self._check_claim()
+            raise
+        try:
+            self._check_claim(mine)
+        except RuntimeError:
+            os.replace(mine, claim)
+            raise
+        os.replace(mine, self.files.frames)
 
     def abort(self) -> None:
         """Stop without writing; nothing of the episode is left on disk.
@@ -675,11 +706,12 @@ class EpisodeWriter:
             with contextlib.suppress(OSError, pa.ArrowException):
                 self._writer.close()
             self._writer = None
-        with contextlib.suppress(OSError):
-            self._claim.close()
         for encoder in self._encoders.values():
             encoder.abort()
-        if not self._owns_claim():
+        owned = self._owns_claim()
+        with contextlib.suppress(OSError):
+            self._claim.close()
+        if not owned:
             return
         for path in (
             self.files.trajectory,
