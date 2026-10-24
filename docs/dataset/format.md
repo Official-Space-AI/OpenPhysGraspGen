@@ -264,7 +264,7 @@ or ignore them.
 
 `SHA256SUMS` lists every entry of `files` and `tools` as `<sha256>  <path>`, in path order, as
 `sha256sum -c` reads it. The check reads `metadata.yaml` and the criteria file only when neither
-repeats a key in a mapping or nests deeper than 64 levels.
+repeats a key in a mapping, uses an alias or nests deeper than 64 levels.
 
 ## Finalizing
 

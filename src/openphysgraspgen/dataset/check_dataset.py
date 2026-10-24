@@ -1431,8 +1431,8 @@ class _RepeatedKey(Exception):
 def load_yaml(data: bytes, what: str) -> Any:
     """A YAML document from its bytes as PyYAML's safe loader reads it (its C loader when
     there is one), refusing a key repeated in a mapping, as parsers disagree on which of
-    the two values counts, and a document nested deeper than MAX_YAML_NESTING levels.
-    what names the file in a refusal."""
+    the two values counts, an alias, as one can make a value hold itself, and a document
+    nested deeper than MAX_YAML_NESTING levels. what names the file in a refusal."""
     yaml = _yaml()
     steps = {
         yaml.MappingStartEvent: 1,
@@ -1462,6 +1462,11 @@ def load_yaml(data: bytes, what: str) -> Any:
         # deep enough document overflows.
         depth = 0
         for event in yaml.parse(text, Loader=Loader):
+            if isinstance(event, yaml.AliasEvent):
+                raise CheckError(
+                    f"{what} uses the alias *{event.anchor} "
+                    f"(line {event.start_mark.line + 1})"
+                )
             depth += steps.get(type(event), 0)
             if depth > MAX_YAML_NESTING:
                 raise CheckError(f"{what} nests deeper than {MAX_YAML_NESTING} levels")

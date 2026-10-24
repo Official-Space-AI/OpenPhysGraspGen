@@ -1197,6 +1197,16 @@ def test_finalize_writes_metadata_the_check_reads_from_the_deepest_footer(tmp_pa
     assert metadata["provenance"]["generation"] == [provenance]
 
 
+def test_finalize_writes_a_value_held_twice_in_full():
+    # PyYAML writes a value held twice as an alias, which the check refuses.
+    shared = {"a": [1, 2]}
+    held_twice = {"x": shared, "y": shared}
+    with pytest.raises(fmt.CheckError, match="uses the alias"):
+        fmt.load_yaml(yaml.safe_dump(held_twice).encode(), "metadata")
+    text = yaml.dump(held_twice, Dumper=finalize_module._Dumper)
+    assert fmt.load_yaml(text.encode(), "metadata") == held_twice
+
+
 def test_the_card_front_matter_declares_each_table(tmp_path):
     text = card_front_matter()
     assert text.startswith("---\n") and text.endswith("---\n")

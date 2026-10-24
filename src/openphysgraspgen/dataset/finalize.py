@@ -81,6 +81,14 @@ def card_front_matter(license: str = "CC-BY-4.0") -> str:
     return f"---\n{yaml.safe_dump(header, sort_keys=False)}---\n"
 
 
+class _Dumper(yaml.SafeDumper):
+    """Writes a value as often as metadata.yaml holds it, never as an alias, which the
+    check refuses."""
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
 def _refuse(errors: list[str]) -> None:
     if errors:
         raise DatasetError(
@@ -349,7 +357,9 @@ def finalize_dataset(
     _write_atomic(root / GITATTRIBUTES_NAME, GITATTRIBUTES)
     _write_atomic(
         root / fmt.METADATA_NAME,
-        yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True, width=100),
+        yaml.dump(
+            metadata, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=100
+        ),
     )
     sums = sorted((f["path"], f["sha256"]) for f in [*files_out, *tool_entries])
     _write_atomic(

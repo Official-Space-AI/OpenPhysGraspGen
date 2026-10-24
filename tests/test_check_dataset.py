@@ -39,6 +39,7 @@ from mp4_index import minimal_mp4, sample_entry
 
 from openphysgraspgen.dataset import DatasetError, finalize_dataset
 from openphysgraspgen.dataset import check_dataset as fmt
+from openphysgraspgen.dataset import finalize as finalize_module
 
 SEED = 7
 SCRIPT = Path(fmt.__file__)
@@ -97,7 +98,14 @@ def read_meta(root):
 
 
 def write_meta(root, metadata):
-    text = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True, width=100)
+    # As finalize writes it: a value held twice is written out twice, not as an alias.
+    text = yaml.dump(
+        metadata,
+        Dumper=finalize_module._Dumper,
+        sort_keys=False,
+        allow_unicode=True,
+        width=100,
+    )
     (root / "metadata.yaml").write_text(text)
 
 
@@ -645,6 +653,7 @@ def test_criteria_values_are_refused_before_any_file_is_read(
             "nests deeper than 64 levels",
             id="65-levels",
         ),
+        ("scale: &a {min_frames: 1}\ndiversity: *a\n", "uses the alias *a (line 2)"),
     ],
 )
 def test_a_criteria_file_that_is_not_one_is_refused(tmp_path, text, message):
@@ -816,6 +825,18 @@ def test_a_metadata_yaml_too_deep_to_compose_is_refused(root):
     assert code == 2, out
     assert payload["reason"].startswith("metadata ")
     assert payload["reason"].endswith("metadata.yaml nests deeper than 64 levels")
+
+
+def test_a_metadata_yaml_alias_is_refused(root):
+    # An alias can make a value hold itself, which no report could print.
+    text = (root / "metadata.yaml").read_text()
+    assert "\ncounts:\n" in text
+    text = text.replace("\ncounts:\n", "\ncounts: &c\n  self: *c\n", 1)
+    (root / "metadata.yaml").write_text(text)
+    line = text.splitlines().index("  self: *c") + 1
+    code, out, _, payload = run(root, root, "--seed", SEED)
+    assert code == 2, out
+    assert payload["reason"].endswith(f"metadata.yaml uses the alias *c (line {line})")
 
 
 @pytest.mark.parametrize(
