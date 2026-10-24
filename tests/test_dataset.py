@@ -13,12 +13,15 @@ import pytest
 pytest.importorskip("pyarrow")
 pytest.importorskip("yaml")
 
+import pyarrow as pa
 import pyarrow.parquet as pq
+import yaml
 
 from physgraspgen.dataset import (
     DatasetError,
     DatasetSpec,
     GraspDataRecorder,
+    card_front_matter,
     episode_metadata,
     read_frames,
     read_metadata,
@@ -228,6 +231,15 @@ def write_episode(recorder, uid="ep-0", object_type="apple", n_frames=5, **kwarg
         return fill(episode, n_frames)
 
 
+def rewrite(path, change):
+    """Rewrite a Parquet file through change(table, footer) -> (table, footer)."""
+    table = pq.read_table(path)
+    footer = episode_metadata(path)
+    table, footer = change(table, footer)
+    metadata = None if footer is None else {fmt.METADATA_KEY: json.dumps(footer)}
+    pq.write_table(table.replace_schema_metadata(metadata), path)
+
+
 def edit(array, index, value):
     out = np.array(array, dtype=float)
     out[index] = value
@@ -313,6 +325,7 @@ def test_an_episode_reads_back_as_written(tmp_path):
                 np.testing.assert_array_equal(trajectory[name][i], row[name], name)
 
     meta = episode_metadata(files.frames)
+    assert set(meta) == set(fmt.EPISODE_KEYS)
     assert meta["format_version"] == fmt.FORMAT_VERSION
     assert (meta["n_frames"], meta["n_steps"], meta["n_tets"]) == (5, 10, T)
     assert (meta["facts"], meta["task"]) == (FACTS, TASK)
@@ -796,40 +809,258 @@ def test_finalize_lists_and_hashes_every_file(tmp_path):
     write_episode(recorder, uid="ep-1", object_type="banana", n_frames=3)
     (tmp_path / "tools").mkdir()
     (tmp_path / "tools" / "check_criteria.yaml").write_text("scale: {min_frames: 1}\n")
+    (tmp_path / "README.md").write_text(card_front_matter() + "\n# unit-test\n")
 
-    metadata = recorder.finalize(workers=2)
+    metadata = recorder.finalize(
+        doi="10.5281/zenodo.1234567",
+        download_url="https://huggingface.co/datasets/org/unit-test",
+        workers=2,
+    )
     assert metadata == read_metadata(tmp_path)
+    assert metadata["doi"] == "10.5281/zenodo.1234567"
     assert metadata["counts"]["n_frames"] == 8
     assert metadata["counts"]["n_episodes"] == 2
     assert metadata["counts"]["n_object_types"] == 2
+    assert metadata["counts"]["n_files"] == len(metadata["files"]) == 4
     assert metadata["object_types"]["banana"] == {
         "n_episodes": 1,
         "n_frames": 3,
         "assets": ["banana_01"],
     }
     assert {f["kind"] for f in metadata["files"]} == {"frames", "trajectory"}
+    assert [f["n_steps"] for f in metadata["files"] if f["kind"] == "trajectory"] == [
+        10,
+        6,
+    ]
+    assert metadata["video"] is None
+    assert metadata["conventions"]["segmentation_classes"] == list(
+        fmt.SEGMENTATION_CLASSES
+    )
+    assert [t["path"] for t in metadata["tools"]] == ["tools/check_criteria.yaml"]
     lines = (tmp_path / "SHA256SUMS").read_text().splitlines()
     assert len(lines) == len(metadata["files"]) + 1
     for line in lines:
         digest, rel = line.split("  ")
         assert hashlib.sha256((tmp_path / rel).read_bytes()).hexdigest() == digest
+    assert (tmp_path / ".gitattributes").read_text().splitlines() == [
+        "/metadata.yaml -text",
+        "/SHA256SUMS -text",
+        "/tools/** -text",
+        "*.parquet filter=lfs diff=lfs merge=lfs -text",
+        "*.mp4 filter=lfs diff=lfs merge=lfs -text",
+    ]
+    # A second run finds the files it wrote and the card where it expects them.
+    assert recorder.finalize()["counts"] == metadata["counts"]
 
 
-def test_finalize_refuses_what_the_format_does_not_describe(tmp_path):
+def test_finalize_states_no_classes_without_masks(tmp_path):
+    channels = ("depth", "force", "stress", "deformation_gradient")
+    recorder = GraspDataRecorder(tmp_path, make_spec(channels=channels))
+    write_episode(recorder)
+    metadata = recorder.finalize()
+    assert metadata["conventions"]["segmentation_classes"] is None
+    assert metadata["channels"] == list(channels)
+
+
+def test_the_card_front_matter_declares_each_table(tmp_path):
+    text = card_front_matter()
+    assert text.startswith("---\n") and text.endswith("---\n")
+    header = yaml.safe_load(text.strip("-\n"))
+    assert header == {
+        "license": "cc-by-4.0",
+        "configs": [
+            {
+                "config_name": "frames",
+                "data_files": "data/*/*.parquet",
+                "default": True,
+            },
+            {"config_name": "trajectories", "data_files": "trajectories/*/*.parquet"},
+        ],
+    }
+
+
+def _case_sensitive(path):
+    probe = path / "case-probe"
+    probe.mkdir()
+    sensitive = not (path / "CASE-PROBE").exists()
+    probe.rmdir()
+    return sensitive
+
+
+def _drop_last_frame(table, footer):
+    return table.slice(0, table.num_rows - 1), footer
+
+
+def _damage_a_page(root):
+    path = root / "data/apple/ep-0.parquet"
+    group = pq.read_metadata(path).row_group(0)
+    column = next(
+        group.column(i)
+        for i in range(group.num_columns)
+        if group.column(i).path_in_schema == "depth.front.depth_m.list.element"
+    )
+    data = bytearray(path.read_bytes())
+    data[column.data_page_offset + column.total_compressed_size // 2] ^= 0x01
+    path.write_bytes(bytes(data))
+
+
+def _swap_trajectory_of_an_earlier_write(root):
+    recorder = GraspDataRecorder(root, make_spec())
+    trajectory = recorder.files("apple", "ep-0").trajectory
+    earlier = trajectory.read_bytes()
+    write_episode(recorder, overwrite=True, label="fail")
+    trajectory.write_bytes(earlier)
+
+
+FINALIZE_REFUSALS = [
+    (
+        lambda root: (root / "data/apple/ep-9.parquet.part").write_bytes(b""),
+        "data/apple/ep-9.parquet.part is not part of the format",
+    ),
+    (
+        lambda root: (root / "trajectories/banana/ep-1.parquet").unlink(),
+        "trajectories/banana/ep-1.parquet is missing",
+    ),
+    (
+        lambda root: shutil.copy(
+            root / "trajectories/banana/ep-1.parquet",
+            root / "trajectories/banana/ep-7.parquet",
+        ),
+        "trajectories/banana/ep-7.parquet belongs to no episode",
+    ),
+    (
+        lambda root: rewrite(root / "data/apple/ep-0.parquet", lambda t, f: (t, None)),
+        "carries no physgraspgen metadata",
+    ),
+    (
+        lambda root: rewrite(
+            root / "data/apple/ep-0.parquet",
+            lambda t, f: (t, {**f, "format_version": "1.0"}),
+        ),
+        "data/apple/ep-0.parquet is not physgraspgen-public 2.0",
+    ),
+    (
+        lambda root: rewrite(
+            root / "data/apple/ep-0.parquet",
+            lambda t, f: (t, {k: v for k, v in f.items() if k != "video"}),
+        ),
+        r"its metadata lacks \['video'\]",
+    ),
+    (
+        lambda root: shutil.copy(
+            root / "data/apple/ep-0.parquet", root / "data/apple/ep-5.parquet"
+        ),
+        "data/apple/ep-5.parquet holds episode ep-0 of apple",
+    ),
+    (
+        lambda root: write_episode(
+            GraspDataRecorder(root, make_spec()), uid="ep-0", object_type="cherry"
+        ),
+        "episode ep-0 is under two object types",
+    ),
+    (
+        lambda root: write_episode(
+            GraspDataRecorder(root, make_spec()),
+            uid="ep-2",
+            object_type="cherry",
+            object_asset="apple_01",
+        ),
+        r"object asset apple_01 is under object types \['apple', 'cherry'\]",
+    ),
+    (
+        lambda root: write_episode(
+            GraspDataRecorder(root, make_spec(version="0.0.2")), uid="ep-2"
+        ),
+        "episodes disagree on dataset_version",
+    ),
+    (
+        lambda root: rewrite(
+            root / "data/apple/ep-0.parquet",
+            lambda t, f: (t, {**f, "facts": {**f["facts"], "lighting": {}}}),
+        ),
+        "facts.lighting holds no value but null",
+    ),
+    (
+        lambda root: shutil.copy(
+            root / "trajectories/banana/ep-1.parquet",
+            root / "trajectories/apple/ep-0.parquet",
+        ),
+        "trajectories/apple/ep-0.parquet: its metadata differs from the frames file's",
+    ),
+    (
+        _swap_trajectory_of_an_earlier_write,
+        r"its metadata differs from the frames file's in \['label'\]",
+    ),
+    (
+        lambda root: rewrite(root / "data/apple/ep-0.parquet", _drop_last_frame),
+        "holds 4 frames, its metadata says 5",
+    ),
+    (_damage_a_page, "data/apple/ep-0.parquet: cannot be read"),
+    (
+        lambda root: rewrite(
+            root / "data/apple/ep-0.parquet",
+            lambda t, f: (t.append_column("extra", pa.array([0] * t.num_rows)), f),
+        ),
+        "data/apple/ep-0.parquet: its columns are not the format's",
+    ),
+    (
+        lambda root: rewrite(
+            root / "trajectories/apple/ep-0.parquet",
+            lambda t, f: (
+                t.set_column(
+                    t.schema.get_field_index("robot.waypoint"),
+                    "robot.waypoint",
+                    t.column("robot.waypoint").cast(pa.int64()),
+                ),
+                f,
+            ),
+        ),
+        "trajectories/apple/ep-0.parquet: its columns are not the format's",
+    ),
+]
+
+
+@pytest.mark.parametrize(("damage", "message"), FINALIZE_REFUSALS)
+def test_finalize_refuses_what_the_format_does_not_describe(tmp_path, damage, message):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    write_episode(recorder, uid="ep-0", object_type="apple")
+    write_episode(recorder, uid="ep-1", object_type="banana", n_frames=3)
+    damage(tmp_path)
+    with pytest.raises(DatasetError, match=message):
+        recorder.finalize(workers=2)
+    assert not (tmp_path / "metadata.yaml").exists()
+    assert not (tmp_path / "SHA256SUMS").exists()
+
+
+def test_finalize_refuses_object_types_that_differ_in_case(tmp_path):
+    sensitive = _case_sensitive(tmp_path)
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    write_episode(recorder, uid="ep-0", object_type="Apple")
+    write_episode(recorder, uid="ep-1", object_type="apple")
+    # A case-insensitive file system puts both episodes in one folder.
+    message = (
+        r"object types \['Apple', 'apple'\] are one type in lower case"
+        if sensitive
+        else "data/Apple/ep-1.parquet holds episode ep-1 of apple"
+    )
+    with pytest.raises(DatasetError, match=message):
+        recorder.finalize()
+
+
+@pytest.mark.parametrize(
+    ("doi", "url", "message"),
+    [
+        ("https://doi.org/10.5281/zenodo.1234567", None, "doi must be a bare DOI"),
+        ("zenodo.1234567", None, "doi must be a bare DOI"),
+        (None, "http://example.org/dataset", "download_url must be an https:// URL"),
+        (None, "https://", "download_url must be an https:// URL"),
+    ],
+)
+def test_finalize_refuses_a_doi_or_url_of_another_form(tmp_path, doi, url, message):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     write_episode(recorder)
-    (tmp_path / "data" / "apple" / "ep-9.parquet.part").write_bytes(b"")
-    with pytest.raises(DatasetError, match="not part of the format"):
-        recorder.finalize()
-    assert not (tmp_path / "metadata.yaml").exists()
-
-
-def test_finalize_refuses_episodes_of_another_dataset(tmp_path):
-    write_episode(GraspDataRecorder(tmp_path, make_spec()), uid="ep-0")
-    other = make_spec(version="0.0.2")
-    write_episode(GraspDataRecorder(tmp_path, other), uid="ep-1")
-    with pytest.raises(DatasetError, match="disagree on dataset_version"):
-        GraspDataRecorder(tmp_path, other).finalize()
+    with pytest.raises(DatasetError, match=message):
+        recorder.finalize(doi=doi, download_url=url)
 
 
 # --- video ----------------------------------------------------------------------

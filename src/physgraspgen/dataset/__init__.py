@@ -15,7 +15,7 @@ from .check_dataset import (
     VideoTrack,
     video_tracks,
 )
-from .finalize import DatasetError, finalize_dataset
+from .finalize import DatasetError, card_front_matter, finalize_dataset
 from .reader import episode_metadata, read_frames, read_metadata, read_trajectory
 from .video import VideoSpec, read_video
 from .writer import DatasetSpec, EpisodeFiles, EpisodeWriter, GraspDataRecorder
@@ -34,6 +34,7 @@ __all__ = [
     "GraspDataRecorder",
     "VideoSpec",
     "VideoTrack",
+    "card_front_matter",
     "episode_metadata",
     "finalize_dataset",
     "read_frames",

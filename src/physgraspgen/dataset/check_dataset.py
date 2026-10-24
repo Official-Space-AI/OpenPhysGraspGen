@@ -11,6 +11,7 @@ cannot disagree about a file, a column or a value rule. The format is documented
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import struct
@@ -42,8 +43,40 @@ LABELS = ("success", "fracture", "fail", "unknown")
 # The kinds of an episode's facts that the diversity tables read.
 FACT_KINDS = ("material", "placement", "lighting", "camera")
 FILE_KINDS = ("frames", "trajectory", "video")
+# The keys of the metadata both Parquet files of an episode carry under METADATA_KEY.
+EPISODE_KEYS = (
+    "format",
+    "format_version",
+    "dataset_name",
+    "dataset_version",
+    "license",
+    "episode_uid",
+    "object_type",
+    "object_asset",
+    "label",
+    "n_frames",
+    "n_steps",
+    "n_tets",
+    "fps",
+    "recorded_fps",
+    "channels",
+    "cameras",
+    "image_size",
+    "segmentation_classes",
+    "video",
+    "facts",
+    "task",
+    "header",
+    "generation_provenance",
+    "export_provenance",
+    "source_n_frames",
+    "source_cut_at_row",
+)
 # Object types, episode ids and camera names become path components.
 NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# metadata.yaml's doi is a bare DOI and its download_url an https URL.
+DOI_PATTERN = re.compile(r"10\.\d{4,9}(?:\.\d+)*/\S+")
+URL_PATTERN = re.compile(r"https://\S+")
 
 # A column is (dtype, shape). The shape is () for one value, a tuple of sizes for a
 # fixed-size list of that many values stored row-major, "image" for one value per
@@ -247,6 +280,53 @@ def arrow_type(
     if isinstance(shape, tuple) and all(isinstance(n, int) for n in shape):
         return pa.list_(value, math.prod(shape))
     raise ValueError(f"unknown column shape {shape!r}")
+
+
+def _shape_metadata(
+    shape: object, image_size: tuple[int, int] | None
+) -> dict[str, str] | None:
+    if shape == "image":
+        return {"shape": json.dumps(list(image_size or ()))}
+    if isinstance(shape, tuple) and shape and shape[0] == "tets":
+        return {"shape": json.dumps(["n_tets"] if shape[1] == 1 else ["n_tets", 3, 3])}
+    if isinstance(shape, tuple) and shape:
+        return {"shape": json.dumps(list(shape))}
+    return None
+
+
+def frame_schema(
+    channels: tuple[str, ...],
+    cameras: tuple[str, ...],
+    image_size: Mapping[str, tuple[int, int]],
+) -> pa.Schema:
+    """The Arrow schema of a frames file; image_size maps a camera to (height, width)."""
+    fields = []
+    for name, (dtype, shape) in frame_columns(channels, cameras).items():
+        size = image_size[column_camera(name)] if shape == "image" else None
+        fields.append(
+            pa.field(
+                name,
+                arrow_type(dtype, shape, size),
+                nullable=False,
+                metadata=_shape_metadata(shape, size),
+            )
+        )
+    return pa.schema(fields)
+
+
+def trajectory_schema() -> pa.Schema:
+    """The Arrow schema of a trajectory file."""
+    return pa.schema(
+        [
+            pa.field(
+                name,
+                arrow_type(dtype, shape),
+                nullable=False,
+                metadata=_shape_metadata(shape, None),
+            )
+            for name, (dtype, shape) in TRAJECTORY_COLUMNS.items()
+        ]
+    )
 
 
 # --- values ---------------------------------------------------------------------------

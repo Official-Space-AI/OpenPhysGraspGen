@@ -127,46 +127,6 @@ def _part(path: Path) -> Path:
     return path.with_name(path.name + ".part")
 
 
-def _shape_metadata(shape: object, size: tuple[int, int] | None) -> dict[str, str]:
-    if shape == "image":
-        return {"shape": json.dumps(list(size or ()))}
-    if isinstance(shape, tuple) and shape and shape[0] == "tets":
-        return {"shape": json.dumps(["n_tets"] if shape[1] == 1 else ["n_tets", 3, 3])}
-    if isinstance(shape, tuple) and shape:
-        return {"shape": json.dumps(list(shape))}
-    return {}
-
-
-def frame_schema(spec: DatasetSpec) -> pa.Schema:
-    fields = []
-    for name, (dtype, shape) in fmt.frame_columns(spec.channels, spec.cameras).items():
-        camera = fmt.column_camera(name)
-        size = spec.image_size.get(camera) if camera else None
-        fields.append(
-            pa.field(
-                name,
-                fmt.arrow_type(dtype, shape, size),
-                nullable=False,
-                metadata=_shape_metadata(shape, size) or None,
-            )
-        )
-    return pa.schema(fields)
-
-
-def trajectory_schema() -> pa.Schema:
-    return pa.schema(
-        [
-            pa.field(
-                name,
-                fmt.arrow_type(dtype, shape),
-                nullable=False,
-                metadata=_shape_metadata(shape, None) or None,
-            )
-            for name, (dtype, shape) in fmt.TRAJECTORY_COLUMNS.items()
-        ]
-    )
-
-
 def _leaves(schema: pa.Schema) -> list[tuple[str, str]]:
     """The Parquet leaf columns of a schema: (path, physical type)."""
     sink = pa.BufferOutputStream()
@@ -197,6 +157,7 @@ def _writer_options(schema: pa.Schema, spec: DatasetSpec) -> dict[str, Any]:
             path for path, kind in leaves if kind in ("FLOAT", "DOUBLE")
         ],
         "write_statistics": scalars,
+        "write_page_checksum": True,
     }
 
 
@@ -348,9 +309,9 @@ class EpisodeWriter:
             root, info["object_type"], info["episode_uid"], spec.video_cameras
         )
         self._columns = fmt.frame_columns(spec.channels, spec.cameras)
-        self._schema = frame_schema(spec)
+        self._schema = fmt.frame_schema(spec.channels, spec.cameras, spec.image_size)
         self._options = _writer_options(self._schema, spec)
-        self._trajectory_schema = trajectory_schema()
+        self._trajectory_schema = fmt.trajectory_schema()
         self._layers = [
             name.rsplit(".", 1)[0]
             for name in self._columns
@@ -764,7 +725,8 @@ class GraspDataRecorder:
     """Records grasp episodes in the public dataset format.
 
     Several recorders, in several processes, can write episodes of one dataset into
-    one root; finalize writes ``metadata.yaml`` and ``SHA256SUMS`` once all are written.
+    one root; finalize writes ``metadata.yaml``, ``SHA256SUMS`` and ``.gitattributes``
+    once all are written.
     """
 
     def __init__(
