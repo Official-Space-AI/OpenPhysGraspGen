@@ -35,3 +35,16 @@ jobs:
       - run: pytest --cov=openphysgraspgen --cov-report=term-missing
       - name: CLI smoke test
         run: openphysgraspgen > /dev/null
+
+  test-oldest:
+    # The oldest versions the dataset check accepts, beside a Python it refuses.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.9
+            3.10
+      - run: pip install -e ".[dev,dataset]" numpy==1.26.4 pyarrow==17.0.0 pyyaml==6.0.1
+      - run: pytest
