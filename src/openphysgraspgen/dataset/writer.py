@@ -221,8 +221,9 @@ def _value(name: str, value: Any, dtype: str, expected: tuple[int, ...] | None) 
     whether NaN is allowed there.
     """
     if dtype == "string":
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"{name} must be a nonempty string")
+        problem = fmt.text_error(value)
+        if problem:
+            raise ValueError(f"{name} {problem}")
         return value
     if (
         value is None
@@ -762,19 +763,21 @@ class GraspDataRecorder:
         n_tets: int,
         label: str,
         facts: Mapping[str, Any],
+        source_n_frames: int | None,
         task: Mapping[str, Any] | None = None,
         header: Mapping[str, Any] | None = None,
         generation_provenance: Mapping[str, Any] | None = None,
         export_provenance: Mapping[str, Any] | None = None,
-        source_n_frames: int | None = None,
         source_cut_at_row: int = -1,
         overwrite: bool = False,
     ) -> EpisodeWriter:
         """Start writing an episode.
 
         facts holds each of the kinds material, placement, lighting and camera as a
-        mapping with at least one value that is not null. task is free-form until the
-        PG-T1 scorer defines its keys.
+        mapping with at least one value that is not null. source_n_frames is the
+        generator's frame count, which n_steps equals when the trajectory holds every
+        step it recorded; it is required, and None only when the count is unknown. task
+        is free-form until the PG-T1 scorer defines its keys.
         """
         for key, value in (("episode_uid", episode_uid), ("object_type", object_type)):
             if not isinstance(value, str):

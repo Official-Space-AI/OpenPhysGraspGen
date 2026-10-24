@@ -219,6 +219,7 @@ def open_episode(recorder, uid="ep-0", object_type="apple", **kwargs):
         "n_tets": T,
         "label": "success",
         "facts": FACTS,
+        "source_n_frames": None,
         "task": TASK,
         **kwargs,
     }
@@ -270,7 +271,7 @@ def files_under(root):
 
 def test_an_episode_reads_back_as_written(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
-    frames = write_episode(recorder)
+    frames = write_episode(recorder, source_n_frames=10)
     files = recorder.files("apple", "ep-0")
 
     data = read_frames(files.frames)
@@ -341,6 +342,7 @@ def test_an_episode_reads_back_as_written(tmp_path):
     assert set(meta) == set(fmt.EPISODE_KEYS)
     assert meta["format_version"] == fmt.FORMAT_VERSION
     assert (meta["n_frames"], meta["n_steps"], meta["n_tets"]) == (5, 10, T)
+    assert (meta["source_n_frames"], meta["source_cut_at_row"]) == (10, -1)
     assert (meta["facts"], meta["task"]) == (FACTS, TASK)
     assert (meta["video"], meta["ffmpeg_version"]) == (None, None)
     assert episode_metadata(files.trajectory) == meta
@@ -484,11 +486,13 @@ def test_the_value_rules_accept_what_the_reader_returns(tmp_path):
             assert fmt.world_to_camera_error(matrix) is None
         valid = data["stress.valid"][i]
         assert fmt.stress_error(data["stress.von_mises"][i], valid) is None
+        assert fmt.text_error(data["robot.phase"][i]) is None
     trajectory = read_trajectory(files.trajectory)
     previous = None
     for i in range(len(trajectory["sim_step"])):
         row = {name: values[i] for name, values in trajectory.items()}
         assert fmt.trajectory_row_error(row, previous) is None
+        assert fmt.text_error(row["robot.phase"]) is None
         previous = row["sim_step"]
 
 
@@ -507,6 +511,7 @@ FRAME_REFUSALS = [
         r"depth.front.depth_m must have shape \(64, 96\)",
     ),
     (lambda f: {"robot.waypoint": 1.5}, "robot.waypoint must be integers"),
+    (lambda f: {"robot.phase": ""}, "robot.phase must be a nonempty string"),
     (lambda f: {"robot.waypoint": 2**31}, "robot.waypoint does not fit int32"),
     (
         lambda f: {"force.gripper_net_force": np.array([1e39, 0.0, 0.0])},
@@ -672,6 +677,7 @@ STEP_REFUSALS = [
         "robot.gripper_width_cmd_m must be finite",
     ),
     ({"robot.waypoint": None}, "robot.waypoint must be integers"),
+    ({"robot.phase": None}, "robot.phase must be a nonempty string"),
 ]
 
 
@@ -754,6 +760,20 @@ def test_episode_arguments_are_checked(tmp_path, change, error, message):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     with pytest.raises(error, match=message):
         open_episode(recorder, **change)
+    assert files_under(tmp_path) == []
+
+
+def test_an_episode_states_the_generators_frame_count(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    with pytest.raises(TypeError, match="source_n_frames"):
+        recorder.episode(
+            episode_uid="ep-0",
+            object_type="apple",
+            object_asset="apple_01",
+            n_tets=T,
+            label="success",
+            facts=FACTS,
+        )
     assert files_under(tmp_path) == []
 
 

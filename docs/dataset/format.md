@@ -143,6 +143,7 @@ deformation gradient (N, T, 3, 3).
   rotation R satisfies `R R^T = I` and `det R = +1` to within 1e-6. A rotation computed in
   float32, or composed of float32 rotations, can miss that, so compute R in float64, for example
   from a normalized quaternion.
+- `robot.phase` is a nonempty string, here and in the trajectory.
 - A mask value is the index of a segmentation class, 0 to 5. Depth and `stress.volume_ratio` have
   no rule beyond their type.
 
@@ -196,7 +197,7 @@ Both Parquet files of an episode carry the same metadata as JSON under the foote
 | `facts` | per-episode values the diversity tables read, nested by kind. `material`, `placement`, `lighting` and `camera` are each a mapping holding at least one value that is not null; other kinds may be added |
 | `task` | what benchmark scoring reads besides the trajectory. Its keys are defined by the PG-T1 scorer (issue #20); until then it is free-form, or null |
 | `header`, `generation_provenance`, `export_provenance` | the generator's episode header and the records of the code and data that generated and exported it, or null |
-| `source_n_frames`, `source_cut_at_row` | the generator's frame count, which `n_steps` equals when the trajectory holds every step the generator recorded, or null when not given; and the row the export stopped at because a frame missed a layer (-1 when it did not stop early) |
+| `source_n_frames`, `source_cut_at_row` | the generator's frame count, which `n_steps` equals when the trajectory holds every step the generator recorded, or null when it is unknown; and the row the export stopped at because a frame missed a layer (-1 when it did not stop early) |
 
 Every episode of a dataset must state the same `format`, `format_version`, `dataset_name`,
 `dataset_version`, `license`, `fps`, `recorded_fps`, `channels`, `cameras`, `image_size`,
@@ -332,6 +333,7 @@ with recorder.episode(
     n_tets=n_tets,
     label="success",
     facts=facts,  # material, placement, lighting and camera, each a mapping
+    source_n_frames=n_recorded,  # the generator's frame count
     task=task,
 ) as episode:
     for frame in frames:  # published frames: a mapping from column name to value
@@ -345,8 +347,9 @@ data = read_frames("dataset/data/apple/apple-0001.parquet", columns=["object.cen
 
 A frame gives every column of the frames file except those the writer fills in (`episode_uid`,
 `frame_index`, `sim_time_s`, `force.n_contacts`, the video frame indices and the per-channel steps,
-which may be given but must equal the frame's `sim_step`); `source_frame_index` is required. RGB is
-given as `rgb.<camera>.image`, (H, W, 3) uint8, the contacts as `force.contact_force`,
+which may be given but must equal the frame's `sim_step`); `source_frame_index` is required. So is
+an episode's `source_n_frames`, which is None only when the generator's frame count is unknown. RGB
+is given as `rgb.<camera>.image`, (H, W, 3) uint8, the contacts as `force.contact_force`,
 `force.contact_point_world`, `force.contact_particle`, `force.contact_is_ground` and
 `force.contact_is_robot`, one row per contact, and the camera matrices as 3 x 3 and 4 x 4 arrays. A
 step gives every column of the trajectory file except `episode_uid` and `sim_time_s`. In the `robot`

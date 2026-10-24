@@ -182,9 +182,10 @@ TRAJECTORY_COLUMNS = {
 
 # Value rules, which the functions below apply. Every float value of a column of
 # FINITE_GROUPS, contact forces and points included, is finite, except where the names
-# below allow NaN. A mask value indexes SEGMENTATION_CLASSES, stress.von_mises is NaN
-# exactly where stress.valid is false, and the camera matrices are a pinhole K and a
-# rigid transform. Depth and stress.volume_ratio have no value rule.
+# below allow NaN. A mask value indexes SEGMENTATION_CLASSES, robot.phase is a nonempty
+# string, stress.von_mises is NaN exactly where stress.valid is false, and the camera
+# matrices are a pinhole K and a rigid transform. Depth and stress.volume_ratio have no
+# value rule.
 FINITE_GROUPS = ("robot", "object", "camera", "force", "deformation_gradient")
 # Finite or NaN: the jaw opening at first contact is NaN until the pads carry force.
 MAY_BE_NAN = ("robot.grip_contact_width_m",)
@@ -343,6 +344,11 @@ def finite_error(name: str, value: object) -> str | None:
     if name in MAY_BE_NAN:
         return "must be finite or NaN" if np.isinf(array).any() else None
     return None if np.isfinite(array).all() else "must be finite"
+
+
+def text_error(value: object) -> str | None:
+    """Why a string value, such as robot.phase, is not a nonempty string, or None."""
+    return None if isinstance(value, str) and value else "must be a nonempty string"
 
 
 def mask_error(mask: object) -> str | None:
