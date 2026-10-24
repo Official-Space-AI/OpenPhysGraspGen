@@ -10,13 +10,13 @@ Releases are cut by pushing a version tag. The `Release` workflow
    dependencies it resolves,
 4. fails if the SBOMs miss the package or a dependency, or if a known vulnerability of
    severity high or above is found,
-5. publishes the sdist and wheel to PyPI as `physgraspgen`,
+5. publishes the sdist and wheel to PyPI as `openphysgraspgen`,
 6. attests the build provenance and the SBOM, and creates a GitHub release with the sdist,
    wheel, both SBOMs and `SHA256SUMS` attached. Tags ending in `aN`, `bN` or `rcN` are marked
    as pre-releases.
 
-The PyPI project is `physgraspgen`, the name the funded project's plan uses
-(`pip install physgraspgen`). The package was renamed from `openphysgraspgen` in #13.
+The PyPI project is `openphysgraspgen`, the repository's name. It is not `physgraspgen`,
+because that is the import name of the project's internal solver package (#28).
 
 ## Cutting a release
 
@@ -48,7 +48,7 @@ Python dependency has a new release; review it like any other change.
 
 ## One-time setup
 
-- On PyPI, add a trusted publisher for the project `physgraspgen`: owner
+- On PyPI, add a trusted publisher for the project `openphysgraspgen`: owner
   `Official-Space-AI`, repository `OpenPhysGraspGen`, workflow `release.yml`, environment
   `pypi`. Before the first upload this is a "pending publisher" under the account's
   publishing settings.

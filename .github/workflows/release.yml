@@ -33,7 +33,7 @@ jobs:
       - run: pip install build==1.6.1 twine==7.0.0
       - run: python -m build
       - run: twine check --strict dist/*
-      # The SBOMs describe what `pip install physgraspgen` gives a user: the built wheel
+      # The SBOMs describe what `pip install openphysgraspgen` gives a user: the built wheel
       # and the dependencies it resolves, not the source tree. The environment is created
       # without pip so that only the release and its dependencies are listed.
       - name: Install the wheel into a clean environment
@@ -45,26 +45,26 @@ jobs:
         with:
           path: ${{ runner.temp }}/release-env
           format: spdx-json
-          output-file: sbom/physgraspgen-${{ github.ref_name }}.spdx.json
+          output-file: sbom/openphysgraspgen-${{ github.ref_name }}.spdx.json
           upload-artifact: false
       - name: Generate the CycloneDX SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3 (Syft v1.54.0)
         with:
           path: ${{ runner.temp }}/release-env
           format: cyclonedx-json
-          output-file: sbom/physgraspgen-${{ github.ref_name }}.cdx.json
+          output-file: sbom/openphysgraspgen-${{ github.ref_name }}.cdx.json
           upload-artifact: false
       - name: Check that the SBOMs list the release and its dependencies
         run: |
-          spdx=sbom/physgraspgen-$GITHUB_REF_NAME.spdx.json
-          cdx=sbom/physgraspgen-$GITHUB_REF_NAME.cdx.json
+          spdx=sbom/openphysgraspgen-$GITHUB_REF_NAME.spdx.json
+          cdx=sbom/openphysgraspgen-$GITHUB_REF_NAME.cdx.json
           version=${GITHUB_REF_NAME#v}
-          jq -e --arg v "$version" '.spdxVersion and any(.packages[]; .name == "physgraspgen" and .versionInfo == $v) and any(.packages[]; .name == "numpy")' "$spdx"
-          jq -e --arg v "$version" '.bomFormat == "CycloneDX" and any(.components[]; .name == "physgraspgen" and .version == $v) and any(.components[]; .name == "numpy")' "$cdx"
+          jq -e --arg v "$version" '.spdxVersion and any(.packages[]; .name == "openphysgraspgen" and .versionInfo == $v) and any(.packages[]; .name == "numpy")' "$spdx"
+          jq -e --arg v "$version" '.bomFormat == "CycloneDX" and any(.components[]; .name == "openphysgraspgen" and .version == $v) and any(.components[]; .name == "numpy")' "$cdx"
       - name: Scan the SBOM for known vulnerabilities
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2 (Grype v0.118.0)
         with:
-          sbom: sbom/physgraspgen-${{ github.ref_name }}.spdx.json
+          sbom: sbom/openphysgraspgen-${{ github.ref_name }}.spdx.json
           fail-build: true
           severity-cutoff: high
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/physgraspgen/
+      url: https://pypi.org/project/openphysgraspgen/
     permissions:
       id-token: write
     steps:
@@ -110,7 +110,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*.whl
-          sbom-path: sbom/physgraspgen-${{ github.ref_name }}.spdx.json
+          sbom-path: sbom/openphysgraspgen-${{ github.ref_name }}.spdx.json
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
