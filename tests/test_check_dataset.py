@@ -1199,6 +1199,33 @@ def test_running_out_of_file_descriptors_stops_the_run(root, monkeypatch):
         check(root)
 
 
+def test_every_parquet_read_keeps_only_what_it_decodes(root, monkeypatch):
+    # Pre-buffering, PyArrow's default from version 25, keeps every column chunk read
+    # until the file is closed, and an unbuffered read takes a column chunk whole: a
+    # read of a frames file would then hold the file, not the frames it decodes.
+    opened = []
+    parquet_file = fmt.pq.ParquetFile
+
+    def recorded(path, **options):
+        opened.append(options)
+        return parquet_file(path, **options)
+
+    monkeypatch.setattr(fmt.pq, "ParquetFile", recorded)
+    assert check(root)["pass"]
+    # Every frames file and trajectory, then the frames files again for the step part
+    # and the projection.
+    assert len(opened) > 2 * N_EPISODES
+    assert all(
+        options
+        == {
+            "page_checksum_verification": True,
+            "pre_buffer": False,
+            "buffer_size": 1 << 20,
+        }
+        for options in opened
+    )
+
+
 @POSIX
 def test_the_check_holds_no_file_open_between_reads(tmp_path):
     resource = pytest.importorskip("resource")

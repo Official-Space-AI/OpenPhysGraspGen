@@ -1260,8 +1260,9 @@ ITEMS = ("scale", "metadata", "consistency", "diversity")
 MAX_LISTED = 50
 # How many failed frames of the step part the JSON report lists; its counts are whole.
 MAX_FRAMES_LISTED = 1000
-# About how many bytes of values a frames file is read in at a time: decoding a whole
-# row group of images at 480 x 640 holds over a gigabyte.
+# About how many bytes of values a frames file is decoded at a time. _parquet keeps no
+# part of the file once it is decoded, so this bounds what a read holds, whatever the
+# file's frame count and row groups.
 BYTES_PER_READ = 1 << 24
 # A sha256sum line, in text (<hash>  <path>) or binary (<hash> *<path>) mode.
 CHECKSUM_LINE = re.compile(r"([0-9a-fA-F]{64}) [ *](.+)")
@@ -1811,7 +1812,12 @@ class _Tally:
 
 
 def _parquet(path: Path) -> Any:
-    return pq.ParquetFile(path, page_checksum_verification=True)
+    # Not pre-buffered, which PyArrow 25 and newer default to: that keeps every column
+    # chunk read until the file is closed. A chunk is read through a 1 MiB buffer,
+    # not whole, so a read holds about the frames it decodes.
+    return pq.ParquetFile(
+        path, page_checksum_verification=True, pre_buffer=False, buffer_size=1 << 20
+    )
 
 
 def _array(column: Any) -> Any:
