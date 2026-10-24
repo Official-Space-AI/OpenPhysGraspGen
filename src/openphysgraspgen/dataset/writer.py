@@ -345,7 +345,7 @@ class EpisodeWriter:
         self._encoders: dict[str, VideoEncoder] = {}
         self._done = False
         self._claim = _claim(self.files, info["episode_uid"], overwrite)
-        # The claim's file id once it is closed, which only Windows does before publishing.
+        # The claim's file id once closed, which only Windows does before publishing.
         self._claim_id: tuple[int, int] | None = None
 
     def __enter__(self) -> Self:
