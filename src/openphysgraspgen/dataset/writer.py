@@ -901,6 +901,7 @@ class GraspDataRecorder:
         download_url: str | None = None,
         workers: int = 1,
         criteria: str | Path | None = None,
+        check_seed: int | None = None,
     ) -> dict[str, Any]:
         return finalize_dataset(
             self.root,
@@ -908,4 +909,5 @@ class GraspDataRecorder:
             download_url=download_url,
             workers=workers,
             criteria=criteria,
+            check_seed=check_seed,
         )

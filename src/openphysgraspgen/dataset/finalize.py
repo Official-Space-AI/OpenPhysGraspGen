@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -119,6 +122,40 @@ def _tools(criteria: str | Path | None) -> tuple[dict[str, bytes], dict[str, Any
     return dict(zip(fmt.TOOL_FILES, (script, data))), values
 
 
+def _published_check(root: Path, seed: int, workers: int) -> dict[str, Any]:
+    """Run the dataset's own tools/check_dataset.py on it with this interpreter, and
+    return its exit status and RESULT payload; a check that could not run is refused."""
+    root = root.resolve()
+    done = subprocess.run(
+        [
+            sys.executable,
+            str(root / fmt.TOOL_FILES[0]),
+            str(root),
+            "--seed",
+            str(seed),
+            "--workers",
+            str(max(1, workers)),
+        ],
+        stdout=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        check=False,
+    )
+    lines = done.stdout.strip().splitlines()
+    payload = None
+    if lines and lines[-1].startswith("RESULT "):
+        with contextlib.suppress(ValueError):
+            payload = json.loads(lines[-1].removeprefix("RESULT "))
+    if done.returncode not in (0, 1) or not isinstance(payload, dict):
+        reason = payload.get("reason") if isinstance(payload, dict) else None
+        raise DatasetError(
+            f"the dataset check could not run (exit status {done.returncode}): "
+            f"{reason or 'it printed no RESULT line'}"
+        )
+    return {"exit_status": done.returncode, **payload}
+
+
 def finalize_dataset(
     root: str | Path,
     *,
@@ -126,6 +163,7 @@ def finalize_dataset(
     download_url: str | None = None,
     workers: int = 1,
     criteria: str | Path | None = None,
+    check_seed: int | None = None,
 ) -> dict[str, Any]:
     """Check the episodes under root with the dataset check's own rules, then write the
     check and its criteria into tools/, then .gitattributes, metadata.yaml and
@@ -137,6 +175,12 @@ def finalize_dataset(
     tools/check_criteria.yaml the packaged acceptance values, or the file criteria names.
     doi is a bare DOI (10.<registrant>/<suffix>, a registrant code of 4 to 9 digits)
     and download_url an https URL. Nothing is written when the dataset is refused.
+
+    With check_seed, the tools/check_dataset.py written then checks the dataset with
+    that seed, run by this interpreter, and the metadata returned holds `check`: its
+    exit status and RESULT payload. A failed check is returned as such, and the check
+    fails until doi and download_url are given; one that could not run raises
+    DatasetError.
     """
     root = Path(root)
     errors: list[str] = []
@@ -151,6 +195,10 @@ def finalize_dataset(
         isinstance(download_url, str) and fmt.URL_PATTERN.fullmatch(download_url)
     ):
         errors.append(f"download_url must be an https:// URL: {download_url!r}")
+    if check_seed is not None and (
+        not isinstance(check_seed, int) or isinstance(check_seed, bool)
+    ):
+        errors.append(f"check_seed must be an integer: {check_seed!r}")
     tools, values = _tools(criteria)
     rels, others = fmt.find_data_files(root)
     errors += [f"{rel} is not part of the format" for rel in others]
@@ -307,4 +355,6 @@ def finalize_dataset(
     _write_atomic(
         root / fmt.CHECKSUMS_NAME, "".join(f"{sha}  {rel}\n" for rel, sha in sums)
     )
+    if check_seed is not None:
+        metadata["check"] = _published_check(root, check_seed, workers)
     return metadata

@@ -22,6 +22,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
 from dataset_helpers import (
+    DOI,
     EPISODES,
     N_FRAMES,
     POSIX,
@@ -35,6 +36,7 @@ from dataset_helpers import (
 )
 from mp4_index import minimal_mp4, sample_entry
 
+from openphysgraspgen.dataset import DatasetError, finalize_dataset
 from openphysgraspgen.dataset import check_dataset as fmt
 
 SEED = 7
@@ -2885,3 +2887,54 @@ def test_an_old_python_is_refused_with_a_result_line(root):
     assert done.returncode == 2
     payload = json.loads(done.stdout.splitlines()[-1][len("RESULT ") :])
     assert payload["reason"].startswith("the check needs Python 3.10 or newer; this is")
+
+
+# --- finalize runs the check ----------------------------------------------------------
+
+
+@POSIX
+def test_finalize_runs_the_check_it_publishes(tmp_path):
+    root = tmp_path / "dataset"
+    build_dataset(root, ffmpeg=fake_av1(tmp_path / "bin"), doi=None, download_url=None)
+    criteria = tmp_path / "dataset-criteria.yaml"
+    result = finalize_dataset(root, criteria=criteria, check_seed=SEED)["check"]
+    # Without its DOI and download URL the dataset fails its specification.
+    assert (result["exit_status"], result["pass"]) == (1, False)
+    assert result["metadata"]["spec"]["pass"] is False
+    assert all(result[item]["pass"] for item in ("scale", "consistency", "diversity"))
+    assert result["script"]["matches_published"] is True
+    assert result["criteria"]["matches_published"] is True
+    metadata = finalize_dataset(
+        root,
+        doi=DOI,
+        download_url=URL,
+        criteria=criteria,
+        check_seed=SEED,
+        workers=2,
+    )
+    assert (metadata["check"]["exit_status"], metadata["check"]["pass"]) == (0, True)
+    assert metadata["check"]["consistency"]["projection"]["seed"] == SEED
+    assert "check" not in read_meta(root)
+
+
+def test_finalize_refuses_a_check_that_could_not_run(root, monkeypatch):
+    with pytest.raises(DatasetError, match="check_seed must be an integer: '7'"):
+        finalize_dataset(root, criteria=root / CRITERIA, check_seed="7")
+
+    def refused(args, **kwargs):
+        stdout = 'RESULT {"pass": false, "reason": "no NumPy"}\n'
+        return subprocess.CompletedProcess(args, 2, stdout=stdout)
+
+    monkeypatch.setattr(subprocess, "run", refused)
+    with pytest.raises(
+        DatasetError,
+        match=r"the dataset check could not run \(exit status 2\): no NumPy",
+    ):
+        finalize_dataset(root, criteria=root / CRITERIA, check_seed=SEED)
+
+    def crashed(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, stdout="Traceback\n")
+
+    monkeypatch.setattr(subprocess, "run", crashed)
+    with pytest.raises(DatasetError, match="exit status 1\\): it printed no RESULT"):
+        finalize_dataset(root, criteria=root / CRITERIA, check_seed=SEED)

@@ -298,6 +298,13 @@ and the `.git/` and `.cache/` folders at the root, which a clone of the Hub's re
 whatever its line-ending settings, and sends `*.parquet` and `*.mp4` through Git LFS, as the Hub
 stores them.
 
+With `check_seed=`, finalize then runs the `tools/check_dataset.py` it wrote on the dataset, with
+the running interpreter and that seed, and the metadata it returns holds `check`: the check's exit
+status and its `RESULT` payload. A failed check is returned as such, and the check fails until
+`doi` and `download_url` are given; a check that could not run raises `DatasetError`. That the
+script needs nothing but NumPy, PyArrow and PyYAML is shown by the tests, which run it with
+nothing else importable.
+
 ## Conventions
 
 - **World frame.** Right-handed, z up, so gravity points along -z. Positions, poses, forces and
