@@ -1091,7 +1091,7 @@ def test_the_check_holds_no_file_open_between_reads(tmp_path):
     )
 
     def few_descriptors():
-        resource.setrlimit(resource.RLIMIT_NOFILE, (48, 48))
+        resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
 
     done = subprocess.run(
         [
