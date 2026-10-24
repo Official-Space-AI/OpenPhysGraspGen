@@ -1036,6 +1036,24 @@ def _damage_a_page(root):
     path.write_bytes(bytes(data))
 
 
+def _drop_last_step(table, footer):
+    return table.slice(0, table.num_rows - 1), footer
+
+
+def _footers(root, change):
+    for kind in ("data", "trajectories"):
+        rewrite(root / kind / "apple/ep-0.parquet", lambda t, f: (t, change(f)))
+
+
+def _field_metadata(name, metadata):
+    def change(table, footer):
+        i = table.schema.get_field_index(name)
+        field = table.schema.field(i).with_metadata(metadata)
+        return table.set_column(i, field, table.column(i)), footer
+
+    return change
+
+
 def _swap_trajectory_of_an_earlier_write(root):
     recorder = GraspDataRecorder(root, make_spec())
     trajectory = recorder.files("apple", "ep-0").trajectory
@@ -1127,6 +1145,46 @@ FINALIZE_REFUSALS = [
         lambda root: rewrite(root / "data/apple/ep-0.parquet", _drop_last_frame),
         "holds 4 frames, its metadata says 5",
     ),
+    (
+        lambda root: rewrite(root / "trajectories/apple/ep-0.parquet", _drop_last_step),
+        "trajectories/apple/ep-0.parquet: holds 9 steps, its metadata says 10",
+    ),
+    (
+        lambda root: [shutil.rmtree(root / d) for d in ("data", "trajectories")],
+        "no episodes",
+    ),
+    (
+        lambda root: _footers(root, lambda f: {**f, "object_asset": 5}),
+        "data/apple/ep-0.parquet: its object_asset is not a nonempty string",
+    ),
+    (
+        lambda root: _footers(root, lambda f: {**f, "image_size": {"front": {}}}),
+        "its metadata does not describe its columns: KeyError",
+    ),
+    (
+        lambda root: rewrite(root / "data/apple/ep-0.parquet", lambda t, f: (t, [f])),
+        "data/apple/ep-0.parquet: its physgraspgen metadata is not a mapping",
+    ),
+    (
+        lambda root: rewrite(
+            root / "trajectories/apple/ep-0.parquet", lambda t, f: (t, [])
+        ),
+        "trajectories/apple/ep-0.parquet: its physgraspgen metadata is not a mapping",
+    ),
+    (
+        lambda root: rewrite(
+            root / "data/apple/ep-0.parquet",
+            _field_metadata("camera.front.intrinsics", {"shape": "[9]"}),
+        ),
+        r"the field metadata of \['camera.front.intrinsics'\] is not the format's",
+    ),
+    (
+        lambda root: rewrite(
+            root / "data/apple/ep-0.parquet",
+            _field_metadata("depth.wrist.depth_m", None),
+        ),
+        r"the field metadata of \['depth.wrist.depth_m'\] is not the format's",
+    ),
     (_damage_a_page, "data/apple/ep-0.parquet: cannot be read"),
     (
         lambda root: rewrite(
@@ -1162,6 +1220,21 @@ def test_finalize_refuses_what_the_format_does_not_describe(tmp_path, damage, me
         recorder.finalize(workers=2)
     assert not (tmp_path / "metadata.yaml").exists()
     assert not (tmp_path / "SHA256SUMS").exists()
+
+
+def test_finalize_replaces_the_part_files_of_a_finalize_that_was_stopped(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    write_episode(recorder)
+    for name in ("metadata.yaml.part", "SHA256SUMS.part", ".gitattributes.part"):
+        (tmp_path / name).write_text("half written\n")
+    recorder.finalize()
+    assert files_under(tmp_path) == [
+        ".gitattributes",
+        "SHA256SUMS",
+        "data/apple/ep-0.parquet",
+        "metadata.yaml",
+        "trajectories/apple/ep-0.parquet",
+    ]
 
 
 def test_finalize_refuses_object_types_that_differ_in_case(tmp_path):
@@ -1218,16 +1291,25 @@ def sample_entry(codec=b"av01", width=W, height=H, flags=0x0C):
     return _box(codec, body + child)
 
 
-def minimal_mp4(n_frames, timescale=15360, delta=512, fragmented=False, entry=None):
-    mdhd = _box(b"mdhd", bytes(4) + struct.pack(">III", 0, 0, timescale) + bytes(8))
-    hdlr = _box(b"hdlr", bytes(8) + b"vide" + bytes(12) + b"\0")
+def minimal_mp4(
+    n_frames,
+    timescale=15360,
+    delta=512,
+    fragmented=False,
+    entry=None,
+    handler=b"vide",
+    mdhd=None,
+):
+    if mdhd is None:
+        mdhd = _box(b"mdhd", bytes(4) + struct.pack(">III", 0, 0, timescale) + bytes(8))
+    hdlr = _box(b"hdlr", bytes(8) + handler + bytes(12) + b"\0")
     stsd = _box(b"stsd", bytes(4) + struct.pack(">I", 1) + (entry or sample_entry()))
     stsz = _box(
         b"stsz", bytes(4) + struct.pack(">II", 0, n_frames) + bytes(4 * n_frames)
     )
     stts = _box(b"stts", bytes(4) + struct.pack(">III", 1, n_frames, delta))
     stbl = _box(b"stbl", stsd + stts + stsz)
-    trak = _box(b"trak", _box(b"mdia", mdhd + hdlr + _box(b"minf", stbl)))
+    trak = _box(b"trak", _box(b"mdia", hdlr + _box(b"minf", stbl) + mdhd))
     body = _box(b"ftyp", b"isom" + bytes(4)) + _box(b"moov", trak)
     if fragmented:
         body += _box(b"moof", b"")
@@ -1250,6 +1332,14 @@ def test_video_frames_are_counted_from_the_index(tmp_path):
     path.write_bytes(minimal_mp4(450)[:-8])
     with pytest.raises(ValueError, match="past the end"):
         video_tracks(path)
+
+    # An empty mdhd box, the last of the moov box.
+    path.write_bytes(minimal_mp4(450, mdhd=_box(b"mdhd", b"")))
+    with pytest.raises(ValueError, match="a truncated mdhd box"):
+        video_tracks(path)
+
+    path.write_bytes(minimal_mp4(450, handler=b"soun"))
+    assert video_tracks(path) == []
 
 
 @pytest.mark.parametrize(
@@ -1408,6 +1498,11 @@ def test_read_video_refuses_a_damaged_video(tmp_path):
             "is 64 x 64 pixels, not the camera's 64 x 96",
         ),
         (minimal_mp4(3), "holds 3 frames, not 4"),
+        (minimal_mp4(4, handler=b"soun"), "holds 0 video tracks, not one"),
+        (
+            minimal_mp4(4, mdhd=_box(b"mdhd", b"")),
+            "cannot be read: a truncated mdhd box",
+        ),
     ],
 )
 def test_finalize_refuses_a_video_that_is_not_the_cameras(tmp_path, mp4, message):

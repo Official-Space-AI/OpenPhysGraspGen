@@ -655,31 +655,30 @@ def video_tracks(path: str | Path) -> list[VideoTrack]:
         if mdia is None:
             raise ValueError("a track without mdia")
         hdlr = _child(moov, *mdia, b"hdlr")
-        if hdlr is None or moov[hdlr[0] + 8 : hdlr[0] + 12] != b"vide":
+        if hdlr is None or hdlr[0] + 12 > hdlr[1]:
+            raise ValueError("a track without a handler")
+        if moov[hdlr[0] + 8 : hdlr[0] + 12] != b"vide":
             continue
         mdhd = _child(moov, *mdia, b"mdhd")
         minf = _child(moov, *mdia, b"minf")
         stbl = None if minf is None else _child(moov, *minf, b"stbl")
         if mdhd is None or stbl is None:
             raise ValueError("a video track without mdhd or stbl")
-        version = moov[mdhd[0]]
-        timescale = struct.unpack_from(
-            ">I", moov, mdhd[0] + (20 if version == 1 else 12)
-        )[0]
+        # mdhd version 1 holds 64-bit times before the timescale.
+        at = mdhd[0] + (20 if mdhd[0] < mdhd[1] and moov[mdhd[0]] == 1 else 12)
+        if at + 4 > mdhd[1]:
+            raise ValueError("a truncated mdhd box")
+        timescale = struct.unpack_from(">I", moov, at)[0]
         stsd = _child(moov, *stbl, b"stsd")
         if stsd is None:
             raise ValueError("a video track without a sample description")
         codec, width, height, depth, chroma = _sample_entry(moov, stsd)
-        stsz = _child(moov, *stbl, b"stsz")
-        stz2 = _child(moov, *stbl, b"stz2")
-        if stsz is not None:
-            n_frames = struct.unpack_from(">I", moov, stsz[0] + 8)[0]
-        elif stz2 is not None:
-            n_frames = struct.unpack_from(">I", moov, stz2[0] + 8)[0]
-        else:
+        sizes = _child(moov, *stbl, b"stsz") or _child(moov, *stbl, b"stz2")
+        if sizes is None or sizes[0] + 12 > sizes[1]:
             raise ValueError("a video track without a sample size table")
+        n_frames = struct.unpack_from(">I", moov, sizes[0] + 8)[0]
         stts = _child(moov, *stbl, b"stts")
-        if stts is None:
+        if stts is None or stts[0] + 8 > stts[1]:
             raise ValueError("a video track without a time-to-sample table")
         (n_entries,) = struct.unpack_from(">I", moov, stts[0] + 4)
         if stts[0] + 8 + 8 * n_entries > stts[1]:

@@ -23,7 +23,7 @@ class DatasetError(ValueError):
 
 
 # What reading a damaged or foreign file can raise.
-READ_ERRORS = (OSError, ValueError, struct.error, pa.ArrowException)
+READ_ERRORS = (OSError, ValueError, IndexError, struct.error, pa.ArrowException)
 
 # What every episode of a dataset must state alike. video is the encoder settings; the
 # ffmpeg build that ran them may differ between episodes.
@@ -42,8 +42,10 @@ SHARED_KEYS = (
     "video",
 )
 GITATTRIBUTES_NAME = ".gitattributes"
+# The files finalize writes, each through a .part file of its own.
+WRITTEN = (fmt.METADATA_NAME, fmt.CHECKSUMS_NAME, GITATTRIBUTES_NAME)
 # Files at the root that are not data and are not hashed.
-ROOT_FILES = (fmt.METADATA_NAME, fmt.CHECKSUMS_NAME, "README.md", GITATTRIBUTES_NAME)
+ROOT_FILES = (*WRITTEN, "README.md")
 SKIPPED_DIRS = (".git", ".cache")
 # A git checkout must keep the hashed text files byte for byte (core.autocrlf), and the
 # episode files go through Git LFS, as the Hugging Face Hub stores them.
@@ -90,11 +92,14 @@ def _sha256(path: Path) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
-def _footer(metadata: pq.FileMetaData, path: Path) -> dict[str, Any]:
+def _footer(metadata: pq.FileMetaData) -> dict[str, Any]:
     raw = (metadata.metadata or {}).get(fmt.METADATA_KEY.encode())
     if raw is None:
-        raise DatasetError(f"{path} carries no {fmt.METADATA_KEY} metadata")
-    return json.loads(raw)
+        raise DatasetError(f"carries no {fmt.METADATA_KEY} metadata")
+    footer = json.loads(raw)
+    if not isinstance(footer, dict):
+        raise DatasetError(f"its {fmt.METADATA_KEY} metadata is not a mapping")
+    return footer
 
 
 def _refuse(errors: list[str]) -> None:
@@ -119,8 +124,13 @@ def _read_parquet(path: Path, schema: pa.Schema) -> tuple[pq.FileMetaData, int]:
     """Read every column of every row group, which decodes every page and checks its
     checksum; returns the footer and the row count."""
     with pq.ParquetFile(path, page_checksum_verification=True) as parquet:
-        if not parquet.schema_arrow.equals(schema, check_metadata=False):
+        found = parquet.schema_arrow
+        if not found.equals(schema, check_metadata=False):
             raise DatasetError("its columns are not the format's")
+        # A column's shape is in its field metadata, which equals() leaves out.
+        differ = [f.name for f, g in zip(found, schema) if f.metadata != g.metadata]
+        if differ:
+            raise DatasetError(f"the field metadata of {differ} is not the format's")
         for group in range(parquet.num_row_groups):
             parquet.read_row_group(group)
         return parquet.metadata, parquet.metadata.num_rows
@@ -137,7 +147,7 @@ def _check_file(path: Path, kind: str, meta: dict[str, Any], camera: str | None)
         return rows
     if kind == "trajectory":
         metadata, rows = _read_parquet(path, fmt.trajectory_schema())
-        own = _footer(metadata, path)
+        own = _footer(metadata)
         if own != meta:
             keys = sorted(k for k in {*own, *meta} if own.get(k) != meta.get(k))
             raise DatasetError(f"its metadata differs from the frames file's in {keys}")
@@ -174,11 +184,9 @@ def _verify(
     return None, count, sha, size
 
 
-def _episode_error(rel: str, meta: Any) -> str | None:
+def _episode_error(rel: str, meta: dict[str, Any]) -> str | None:
     _, object_type, name = rel.split("/")
     uid = name[: -len(fmt.PARQUET_SUFFIX)]
-    if not isinstance(meta, dict):
-        return f"{rel}: its metadata is not a mapping"
     if (
         meta.get("format") != fmt.FORMAT
         or meta.get("format_version") != fmt.FORMAT_VERSION
@@ -239,7 +247,10 @@ def finalize_dataset(
             path = here / name
             rel = path.relative_to(root).as_posix()
             parts = rel.split("/")
-            if len(parts) == 1 and name in ROOT_FILES:
+            # A finalize that was stopped may leave its .part files, which it replaces.
+            if len(parts) == 1 and (
+                name in ROOT_FILES or name.removesuffix(".part") in WRITTEN
+            ):
                 continue
             if len(parts) == 2 and parts[0] == fmt.TOOLS_DIR:
                 tools.append(path)
@@ -273,7 +284,7 @@ def finalize_dataset(
     export: dict[str, Any] = {}
     for rel, path in sorted(frames.items()):
         try:
-            meta = _footer(pq.read_metadata(path), path)
+            meta = _footer(pq.read_metadata(path))
         except READ_ERRORS as exc:
             errors.append(f"{rel}: {exc}")
             continue

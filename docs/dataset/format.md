@@ -245,24 +245,26 @@ refuses the dataset. It refuses it when:
 
 - a file under the root is not part of the layout (an interrupted episode leaves `.part` files),
   or an episode's file is missing, or a file belongs to no episode;
-- an episode's metadata is not `physgraspgen-public` 2.0, lacks a key, names another episode or
-  object type than its path, or lacks a kind of `facts`;
+- an episode's metadata is not a mapping, is not `physgraspgen-public` 2.0, lacks a key, names
+  another episode or object type than its path, has an `object_asset` that is not a nonempty
+  string, does not describe its columns, or lacks a kind of `facts`;
 - one episode id is under two object types;
 - episodes disagree on a key that every episode must state alike (see Episode metadata);
 - two object types are one after lower-casing and stripping (`apple`, `Apple`), or one
   `object_asset` is under two object types;
 - a Parquet file cannot be read in full: every column of every row group is decoded and every
   page's checksum verified;
-- a Parquet file's columns differ from the format's (its Arrow schema, schema metadata aside), its
-  row count differs from its metadata, or a trajectory file's metadata differs from its frames
-  file's;
+- a Parquet file's columns differ from the format's (its Arrow schema, with the field metadata
+  that holds each column's shape, the file's own schema metadata aside), its row count differs
+  from its metadata, or a trajectory file's metadata differs from its frames file's;
 - a video differs from the Videos table, read from its index;
 - `doi` or `download_url` is not of the form given in the metadata.yaml table.
 
-It reads each file in full, then hashes it, in `workers` threads. `.gitattributes` marks
-`metadata.yaml`, `SHA256SUMS` and `tools/**` as `-text`, so that a git checkout keeps the bytes
-that are hashed whatever its line-ending settings, and sends `*.parquet` and `*.mp4` through Git
-LFS, as the Hub stores them.
+It reads each Parquet file in full and parses each video's index, then hashes the file, in
+`workers` threads. The `.part` files that a stopped finalize leaves at the root are replaced, not
+refused. `.gitattributes` marks `metadata.yaml`, `SHA256SUMS` and `tools/**` as `-text`, so that a
+git checkout keeps the bytes that are hashed whatever its line-ending settings, and sends
+`*.parquet` and `*.mp4` through Git LFS, as the Hub stores them.
 
 ## Conventions
 
