@@ -1469,6 +1469,25 @@ def test_a_frame_that_breaks_a_value_rule_is_found(root, change, message):
     assert any(e.startswith(message) for e in found), found
 
 
+def test_the_result_does_not_depend_on_how_many_frames_are_read_at_once(
+    root, monkeypatch
+):
+    # About 16 MiB of values a read: 5 frames at 480 x 640, a whole file here.
+    assert fmt.frames_per_read({"front": (480, 640), "wrist": (480, 640)}, 3000) == 5
+    rewrite(root, APPLE, table=cell("robot.ee_pose", 2, at(3, nan)))
+    rewrite(
+        root,
+        "data/banana/ep-2.parquet",
+        table=cell("segmentation.front.mask", 1, at(7, 9)),
+    )
+    whole = check(root, sample=N_FRAMES)
+    assert errors(whole, APPLE) == ["frame 2: robot.ee_pose must be finite"]
+    monkeypatch.setattr(fmt, "BYTES_PER_READ", 1)
+    assert fmt.frames_per_read({"front": (16, 24), "wrist": (16, 24)}, 5) == 1
+    one = check(root, sample=N_FRAMES)
+    assert one["items"] == whole["items"]
+
+
 def test_a_rule_broken_on_several_frames_is_counted(root):
     rewrite(
         root,

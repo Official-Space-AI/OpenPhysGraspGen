@@ -1245,6 +1245,9 @@ ITEMS = ("scale", "metadata", "consistency", "diversity")
 MAX_LISTED = 50
 # How many failed frames of the step part the JSON report lists; its counts are whole.
 MAX_FRAMES_LISTED = 1000
+# About how many bytes of values a frames file is read in at a time: decoding a whole
+# row group of images at 480 x 640 holds over a gigabyte.
+BYTES_PER_READ = 1 << 24
 # A sha256sum line, in text (<hash>  <path>) or binary (<hash> *<path>) mode.
 CHECKSUM_LINE = re.compile(r"([0-9a-fA-F]{64}) [ *](.+)")
 LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
@@ -1771,7 +1774,7 @@ def _parquet(path: Path) -> Any:
 
 
 def _array(column: Any) -> Any:
-    return column.combine_chunks()
+    return column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column
 
 
 def _fixed(array: Any) -> Any:
@@ -1906,9 +1909,17 @@ def read_frames_file(path: Path, rec: DataFile) -> _Frames | None:
     return None
 
 
+def frames_per_read(sizes: Mapping[str, tuple[int, int]], n_tets: int) -> int:
+    """How many frames of a frames file hold about BYTES_PER_READ bytes of values: a
+    pixel's depth and class take 5 bytes, a tetrahedron's values 45, the rest less than
+    a kilobyte."""
+    per_frame = 5 * sum(h * w for h, w in sizes.values()) + 45 * n_tets + 1024
+    return max(1, BYTES_PER_READ // per_frame)
+
+
 def _frame_rows(parquet: Any, rec: DataFile, footer: Mapping[str, Any]) -> _Frames:
-    """The rules on every frame, a row group at a time, with every column decoded and
-    every page checksum the writer wrote verified."""
+    """The rules on every frame, frames_per_read frames at a time, with every column
+    decoded and every page checksum the writer wrote verified."""
     uid, n_tets = footer["episode_uid"], footer["n_tets"]
     fps, recorded_fps = footer["fps"], footer["recorded_fps"]
     channels, cameras = footer["channels"], footer["cameras"]
@@ -1920,10 +1931,10 @@ def _frame_rows(parquet: Any, rec: DataFile, footer: Mapping[str, Any]) -> _Fram
     steps: list[Any] = []
     previous = None
     start = 0
-    for group in range(parquet.num_row_groups):
-        table = parquet.read_row_group(group)
-        n = table.num_rows
-        col = {name: _array(table.column(name)) for name in table.column_names}
+    size = frames_per_read(rec.sizes, n_tets)
+    for batch in parquet.iter_batches(batch_size=size):
+        n = batch.num_rows
+        col = dict(zip(batch.schema.names, batch.columns))
         nulls += [k for k, v in col.items() if k not in nulls and _has_nulls(v)]
         if nulls:
             start += n
@@ -3304,6 +3315,36 @@ def project_frame(
     }
 
 
+def _sampled_frame(
+    row: Any,
+    cameras: list[str],
+    sizes: Mapping[str, tuple[int, int]],
+    columns: list[str],
+) -> dict[str, Any]:
+    """A sampled frame's values from its one-row batch, as project_frame takes them."""
+    frame: dict[str, Any] = {
+        "sim_step": row.column("sim_step")[0].as_py(),
+        "contacts": _contacts(_array(row.column("force.contacts")))[1:],
+    }
+    for camera in cameras:
+        height, width = sizes[camera]
+        for name in (
+            f"segmentation.{camera}.sim_step",
+            f"camera.{camera}.intrinsics",
+            f"camera.{camera}.world_to_camera",
+        ):
+            array = _array(row.column(name))
+            frame[name] = (
+                _fixed(array)[0]
+                if pa.types.is_fixed_size_list(array.type)
+                else array[0].as_py()
+            )
+        for name in (f"segmentation.{camera}.mask", f"depth.{camera}.depth_m"):
+            if name in columns:
+                frame[name] = _fixed(_array(row.column(name)))[0].reshape(height, width)
+    return frame
+
+
 def _project_file(
     root: Path,
     rec: DataFile,
@@ -3313,7 +3354,8 @@ def _project_file(
     judge: tuple[float, float, float],
 ) -> list[dict[str, Any]]:
     """project_frame for a file's sampled frames, the file opened once and only the row
-    groups that hold them read. What one frame raises fails that frame."""
+    groups that hold them read, frames_per_read frames at a time. What one frame raises
+    fails that frame."""
 
     def failure(what: str, exc: Exception) -> dict[str, Any]:
         return {
@@ -3356,44 +3398,24 @@ def _project_file(
             )
             out: dict[int, dict[str, Any]] = {}
             wanted = sorted(set(frames))
+            size = frames_per_read(sizes, 0)
             for group in sorted(
                 {int(np.searchsorted(ends, i, side="right")) for i in wanted}
             ):
-                table = parquet.read_row_group(group, columns=columns)
                 first = int(ends[group - 1]) if group else 0
-                for i in (i for i in wanted if first <= i < ends[group]):
-                    try:
-                        row = table.slice(i - first, 1)
-                        frame: dict[str, Any] = {
-                            "sim_step": row.column("sim_step")[0].as_py(),
-                            "contacts": _contacts(_array(row.column("force.contacts")))[
-                                1:
-                            ],
-                        }
-                        for camera in cameras:
-                            height, width = sizes[camera]
-                            for name in (
-                                f"segmentation.{camera}.sim_step",
-                                f"camera.{camera}.intrinsics",
-                                f"camera.{camera}.world_to_camera",
-                            ):
-                                array = _array(row.column(name))
-                                frame[name] = (
-                                    _fixed(array)[0]
-                                    if pa.types.is_fixed_size_list(array.type)
-                                    else array[0].as_py()
-                                )
-                            for name in (
-                                f"segmentation.{camera}.mask",
-                                f"depth.{camera}.depth_m",
-                            ):
-                                if name in columns:
-                                    frame[name] = _fixed(_array(row.column(name)))[
-                                        0
-                                    ].reshape(height, width)
-                        out[i] = project_frame(frame, cameras, *inputs, *judge)
-                    except Exception as exc:  # noqa: BLE001, it fails the frame
-                        out[i] = failure("the frame could not be projected", exc)
+                for batch in parquet.iter_batches(
+                    batch_size=size, row_groups=[group], columns=columns
+                ):
+                    last = first + batch.num_rows
+                    for i in (i for i in wanted if first <= i < last):
+                        try:
+                            frame = _sampled_frame(
+                                batch.slice(i - first, 1), cameras, sizes, columns
+                            )
+                            out[i] = project_frame(frame, cameras, *inputs, *judge)
+                        except Exception as exc:  # noqa: BLE001, it fails the frame
+                            out[i] = failure("the frame could not be projected", exc)
+                    first = last
             return [out[i] for i in frames]
     except Exception as exc:  # noqa: BLE001, it fails the file's frames
         return [failure("the file cannot be read", exc) for _ in frames]

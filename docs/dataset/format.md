@@ -418,7 +418,8 @@ written as a string.
 
 Hashing reads every byte once. Reading decodes every column, about 1.6 ms a frame at 480 x 640
 with two cameras and 3,000 tetrahedra on one thread, or half an hour per million frames, which
-`--workers` threads share.
+`--workers` threads share. A file is decoded about 16 MiB of values at a time, whatever its row
+groups, so at that size a run holds about 0.5 GB with one thread and 2 GB with eight.
 
 ## Writing and reading
 
