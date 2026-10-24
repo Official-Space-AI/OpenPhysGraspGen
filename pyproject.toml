@@ -34,6 +34,10 @@ openphysgraspgen = "openphysgraspgen.pipeline:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The acceptance values finalize_dataset ships in every dataset with the check.
+"openphysgraspgen.dataset" = ["check_criteria.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
