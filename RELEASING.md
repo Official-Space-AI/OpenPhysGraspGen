@@ -36,7 +36,7 @@ because that is the import name of the project's internal solver package (#28).
 ## Verifying a release
 
 ```sh
-gh attestation verify physgraspgen-1.0.0rc1-py3-none-any.whl --repo Official-Space-AI/OpenPhysGraspGen
+gh attestation verify openphysgraspgen-1.0.0rc1-py3-none-any.whl --repo Official-Space-AI/OpenPhysGraspGen
 ```
 
 ## Keeping the workflow current
