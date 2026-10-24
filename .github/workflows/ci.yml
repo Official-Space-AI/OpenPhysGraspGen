@@ -32,8 +32,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest --cov=physgraspgen --cov-report=term-missing
+      - run: pytest --cov=openphysgraspgen --cov-report=term-missing
       - name: CLI smoke test
+<<<<<<< HEAD
         run: physgraspgen > /dev/null
 
   wheel:
@@ -54,3 +55,6 @@ jobs:
           "$RUNNER_TEMP/wheel-env/bin/python" -c "import physgraspgen; assert 'site-packages' in physgraspgen.__file__, physgraspgen.__file__"
           "$RUNNER_TEMP/wheel-env/bin/python" -m pytest -p no:cacheprovider tests
           "$RUNNER_TEMP/wheel-env/bin/physgraspgen" > /dev/null
+=======
+        run: openphysgraspgen > /dev/null
+>>>>>>> origin/refactor/rename-openphysgraspgen
