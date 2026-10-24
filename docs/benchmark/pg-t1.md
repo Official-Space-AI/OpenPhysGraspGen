@@ -24,8 +24,10 @@ pip install "openphysgraspgen[dataset]"
 openphysgraspgen benchmark pg-t1 path/to/dataset --json pg-t1.json
 ```
 
-The command prints one table per task and writes the report to the `--json` path (default
-`pg-t1.json`) and one record per episode beside it as JSON lines (`pg-t1.episodes.jsonl`).
+The command prints the episodes it refused, each with its rule and why, and the trajectory files
+the dataset does not list (the first 10 of each), then one table per task. It writes the report to
+the `--json` path (default `pg-t1.json`) and one record per episode beside it as JSON lines
+(`pg-t1.episodes.jsonl`).
 `python -m openphysgraspgen benchmark pg-t1 ...` does the same. It exits with 0 when every listed
 episode was scored and no check failed, 1 when an episode was refused or a trajectory file is not
 listed or a check failed (the report is written in every case), and 2 when the dataset cannot be
@@ -138,7 +140,7 @@ as a failure.
 ### Acceptance
 
 An episode that breaks one of these rules is refused: it is not scored, its rule is counted under
-`refusals`, and the run is `incomplete`.
+`refusals` and listed with why under `refused_episodes`, and the run is `incomplete`.
 
 | Word | Rule |
 |---|---|
@@ -330,11 +332,12 @@ reached", never as 0. Floor-arm baselines are scored the same way and reported a
 `floor_arms`, never with the demonstrations.
 
 The JSON report holds `benchmark`, `scorer` (`id`, `version`), `dataset`, `criteria`, `episodes`
-(`listed`, `scored`, `refused`, `refusals`, `unlisted`, `unlisted_paths`), `tasks`, `floor_arms`,
-`check` and `status`. Under `tasks`, each task has its `criterion_id`, `placed_rule` (`put-back`,
-`put-down` or null), `n_object_types`, `population`, `overall` and `by_object_type`; each table
-holds `n` and, for C and B, the three stages (`planned`, `undecidable`, `true`, `false`,
-`not_reached`, `of_attempted`, `of_all` and the two intervals), `task_score`,
+(`listed`, `scored`, `refused`, `refusals`, `refused_episodes` with each refused episode's
+`episode_uid`, `object_type`, rule (`refused`) and why (`detail`), `unlisted`, `unlisted_paths`),
+`tasks`, `floor_arms`, `check` and `status`. Under `tasks`, each task has its `criterion_id`,
+`placed_rule` (`put-back`, `put-down` or null), `n_object_types`, `population`, `overall` and
+`by_object_type`; each table holds `n` and, for C and B, the three stages (`planned`, `undecidable`,
+`true`, `false`, `not_reached`, `of_attempted`, `of_all` and the two intervals), `task_score`,
 `task_score_why_null`, `headline` and `failures` (`counts`, `of_all`, `reasons`). Each line of the
 episodes file is one episode in the listing's order: its verdicts, class and words per criterion,
 C's agreement record, B's crossing and window end, the placement verdict with its facts, and its

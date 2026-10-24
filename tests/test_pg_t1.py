@@ -860,6 +860,7 @@ def test_a_dataset_report_states_what_it_scored(vectors):
         "scored": 32,
         "refused": 0,
         "refusals": {},
+        "refused_episodes": [],
         "unlisted": 0,
         "unlisted_paths": [],
     }
@@ -1160,11 +1161,19 @@ def test_refused_and_unlisted_episodes_make_the_run_incomplete(tmp_path):
     )
     report, records = scored(tmp_path)
     assert report["episodes"]["refusals"] == {"task_block": 1, "trajectory_cut": 1}
+    assert report["episodes"]["refused_episodes"] == [records["ep-1"], records["ep-2"]]
     assert report["episodes"]["unlisted_paths"] == ["trajectories/apple/ep-3.parquet"]
     assert report["status"] == "incomplete"
     assert records["ep-1"]["refused"] == "task_block"
     assert "layout: missing" in records["ep-1"]["detail"]
     assert report["tasks"]["lift_hold"]["overall"]["n"] == 1
+    lines = report_text(report).splitlines()
+    assert lines[3].startswith("  ep-1          task_block: layout: missing; source: ")
+    assert (
+        "  ep-2          trajectory_cut: the trajectory has 390 rows, the generator "
+        "recorded 400" in lines
+    )
+    assert "  unlisted      trajectories/apple/ep-3.parquet" in lines
 
 
 def test_a_trajectory_without_a_column_the_scorer_reads_is_refused(tmp_path):
@@ -1270,6 +1279,10 @@ def test_a_stored_agreement_record_is_compared_entry_by_entry(tmp_path):
     assert check["exact"] == {"E1": False}
     assert check["failures"] == ["E1 agreement.first_up_frame: stored 250, scored 249"]
     assert report["status"] == "check_failed"
+    assert (
+        "  ep-0          E1 agreement.first_up_frame: stored 250, scored 249"
+        in report_text(report).splitlines()
+    )
 
 
 def test_a_stored_lift_without_a_twelve_centimetre_crossing_fails_the_check(tmp_path):

@@ -323,6 +323,7 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
             "scored": len(records),
             "refused": len(refused),
             "refusals": dict(sorted(Counter(r["refused"] for r in refused).items())),
+            "refused_episodes": refused,
             "unlisted": len(unlisted),
             "unlisted_paths": unlisted,
         },
@@ -393,7 +394,7 @@ _KEEP = "\0"
 
 def _field(name: str, text: str, indent: int = 2, column: int = 16) -> list[str]:
     """A labelled field of the printed table, wrapped in the column after its label."""
-    head = " " * indent + f"{name:<{column - indent}}"
+    head = " " * indent + f"{name:<{column - indent - 1}} "
     lines = textwrap.wrap(
         text,
         96,
@@ -494,24 +495,40 @@ def _check_text(check: Mapping[str, Any]) -> list[str]:
         *_field("unavailable", unavailable or "none"),
     ]
     for failure in check["failures"][:10]:
-        lines += _field(failure["episode_uid"], "; ".join(failure["failures"]))
+        lines += _field(str(failure["episode_uid"]), "; ".join(failure["failures"]))
     if len(check["failures"]) > 10:
         lines.append(f"  and {len(check['failures']) - 10} more episodes")
     return lines
 
 
-def report_text(report: Mapping[str, Any]) -> str:
-    """The report as the command prints it."""
-    dataset, episodes = report["dataset"], report["episodes"]
+def _episodes_text(episodes: Mapping[str, Any]) -> list[str]:
     refusals = ", ".join(f"{k} {v}" for k, v in episodes["refusals"].items())
-    scorer = report["scorer"]
     lines = [
-        f"PG-T1, scorer {scorer['id']} (openphysgraspgen {scorer['version']})",
-        f"dataset       {dataset['name']} {dataset['version']} at {dataset['root']}",
         f"episodes      {episodes['listed']} listed, {episodes['scored']} scored, "
         f"{episodes['refused']} refused"
         + (f" ({refusals})" if refusals else "")
         + f", {episodes['unlisted']} unlisted",
+    ]
+    refused = episodes["refused_episodes"]
+    for r in refused[:10]:
+        lines += _field(str(r["episode_uid"]), f"{r['refused']}: {r['detail']}")
+    if len(refused) > 10:
+        lines.append(f"  and {len(refused) - 10} more refused episodes")
+    paths = episodes["unlisted_paths"]
+    for i, path in enumerate(paths[:10]):
+        lines += _field("" if i else "unlisted", path)
+    if len(paths) > 10:
+        lines.append(f"  and {len(paths) - 10} more unlisted files")
+    return lines
+
+
+def report_text(report: Mapping[str, Any]) -> str:
+    """The report as the command prints it."""
+    dataset, scorer = report["dataset"], report["scorer"]
+    lines = [
+        f"PG-T1, scorer {scorer['id']} (openphysgraspgen {scorer['version']})",
+        f"dataset       {dataset['name']} {dataset['version']} at {dataset['root']}",
+        *_episodes_text(report["episodes"]),
     ]
     for name, entry in report["tasks"].items():
         lines += ["", *_task_text(name, entry)]
