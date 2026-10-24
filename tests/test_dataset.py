@@ -66,6 +66,7 @@ from openphysgraspgen.dataset import (
     video_tracks,
 )
 from openphysgraspgen.dataset import check_dataset as fmt
+from openphysgraspgen.dataset import finalize as finalize_module
 from openphysgraspgen.dataset import video as video_module
 from openphysgraspgen.dataset import writer as writer_module
 
@@ -999,8 +1000,10 @@ def test_finalize_lists_and_hashes_every_file(tmp_path):
         generation_provenance=generation,
         export_provenance={"exporter": "0.2.0"},
     )
+    # The tool files of an earlier run are replaced.
     (tmp_path / "tools").mkdir()
     (tmp_path / "tools" / "check_criteria.yaml").write_text("scale: {min_frames: 1}\n")
+    (tmp_path / "tools" / "check_dataset.py.part").write_text("half written\n")
     (tmp_path / "README.md").write_text(card_front_matter() + "\n# unit-test\n")
 
     metadata = recorder.finalize(
@@ -1028,13 +1031,29 @@ def test_finalize_lists_and_hashes_every_file(tmp_path):
     assert metadata["conventions"]["segmentation_classes"] == list(
         fmt.SEGMENTATION_CLASSES
     )
-    assert [t["path"] for t in metadata["tools"]] == ["tools/check_criteria.yaml"]
+    # The dataset ships the check, this package's own module, and its criteria.
+    shipped = {
+        "tools/check_dataset.py": Path(fmt.__file__).read_bytes(),
+        "tools/check_criteria.yaml": Path(fmt.__file__)
+        .with_name("check_criteria.yaml")
+        .read_bytes(),
+    }
+    assert metadata["tools"] == [
+        {
+            "path": rel,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+        }
+        for rel, data in shipped.items()
+    ]
+    for rel, data in shipped.items():
+        assert (tmp_path / rel).read_bytes() == data
     assert metadata["provenance"] == {
         "generation": [generation],
         "export": [{"exporter": "0.1.0"}, {"exporter": "0.2.0"}],
     }
     lines = (tmp_path / "SHA256SUMS").read_text().splitlines()
-    assert len(lines) == len(metadata["files"]) + 1
+    assert len(lines) == len(metadata["files"]) + 2
     for line in lines:
         digest, rel = line.split("  ")
         assert hashlib.sha256((tmp_path / rel).read_bytes()).hexdigest() == digest
@@ -1046,7 +1065,93 @@ def test_finalize_lists_and_hashes_every_file(tmp_path):
         "*.mp4 filter=lfs diff=lfs merge=lfs -text",
     ]
     # A second run finds the files it wrote and the card where it expects them.
-    assert recorder.finalize()["counts"] == metadata["counts"]
+    again = recorder.finalize()
+    assert again["counts"] == metadata["counts"]
+    assert again["tools"] == metadata["tools"]
+    assert sorted(p.name for p in (tmp_path / "tools").iterdir()) == [
+        "check_criteria.yaml",
+        "check_dataset.py",
+    ]
+
+
+def test_finalize_ships_the_criteria_it_is_given(tmp_path):
+    recorder = GraspDataRecorder(tmp_path / "root", make_spec())
+    write_episode(recorder)
+    criteria = tmp_path / "criteria.yaml"
+    text = (Path(fmt.__file__).with_name("check_criteria.yaml")).read_text()
+    criteria.write_text(text.replace("min_frames: 1000000", "min_frames: 5"))
+    metadata = recorder.finalize(criteria=criteria)
+    shipped = tmp_path / "root/tools/check_criteria.yaml"
+    assert shipped.read_bytes() == criteria.read_bytes()
+    assert (
+        metadata["tools"][1]["sha256"]
+        == hashlib.sha256(criteria.read_bytes()).hexdigest()
+    )
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            lambda text: text.replace("min_frames: 1000000", "min_frames: 0"),
+            r"the criteria's \[scale\] min_frames is 0, not an integer of at least 1",
+        ),
+        (
+            lambda text: text.replace("bins: 8", "bins: 8.0"),
+            r"the criteria's \[diversity\] bins is 8.0, not an integer",
+        ),
+        (
+            lambda text: text.replace("  max_categories: 30\n", ""),
+            r"the criteria's \[diversity\] lacks \['max_categories'\]",
+        ),
+        (
+            lambda text: text + "scale:\n  min_frames: 1\n",
+            "repeats the key 'scale'",
+        ),
+        (lambda text: "- a list\n", "is not a YAML mapping"),
+        (lambda text: "scale: [\n", "is not valid YAML"),
+    ],
+)
+def test_finalize_refuses_criteria_the_check_cannot_apply(tmp_path, change, message):
+    recorder = GraspDataRecorder(tmp_path / "root", make_spec())
+    write_episode(recorder)
+    criteria = tmp_path / "criteria.yaml"
+    criteria.write_text(
+        change(Path(fmt.__file__).with_name("check_criteria.yaml").read_text())
+    )
+    with pytest.raises(DatasetError, match=message):
+        recorder.finalize(criteria=criteria)
+    assert files_under(tmp_path / "root") == [
+        "data/apple/ep-0.parquet",
+        "trajectories/apple/ep-0.parquet",
+    ]
+    with pytest.raises(DatasetError, match="no tool files"):
+        recorder.finalize(criteria=tmp_path / "missing.yaml")
+
+
+def test_finalize_refuses_facts_the_criteria_require(tmp_path):
+    recorder = GraspDataRecorder(tmp_path / "root", make_spec())
+    write_episode(recorder)
+    criteria = tmp_path / "criteria.yaml"
+    text = Path(fmt.__file__).with_name("check_criteria.yaml").read_text()
+    criteria.write_text(text.replace("lighting, camera]", "lighting, camera, texture]"))
+    with pytest.raises(
+        DatasetError,
+        match=r"data/apple/ep-0.parquet: its facts lack \['texture'\], which the "
+        "criteria require",
+    ):
+        recorder.finalize(criteria=criteria)
+
+
+def test_finalize_refuses_a_folder_the_hub_cannot_hold(tmp_path, monkeypatch):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    write_episode(recorder, uid="ep-0")
+    write_episode(recorder, uid="ep-1")
+    monkeypatch.setattr(finalize_module, "MAX_FOLDER_FILES", 1)
+    with pytest.raises(
+        DatasetError, match="data/apple holds 2 files; the Hub allows 1 in a folder"
+    ):
+        recorder.finalize()
 
 
 def test_finalize_states_no_classes_without_masks(tmp_path):
@@ -1132,15 +1237,35 @@ FINALIZE_REFUSALS = [
         "data/apple/ep-9.parquet.part is not part of the format",
     ),
     (
+        lambda root: (
+            (root / "tools").mkdir() or (root / "tools/notes.txt").write_text("")
+        ),
+        "tools/notes.txt is not part of the format",
+    ),
+    (
+        lambda root: (root / "data/apple/.DS_Store").write_bytes(b""),
+        "data/apple/.DS_Store is not part of the format",
+    ),
+    (
+        lambda root: shutil.copy(
+            root / "data/apple/ep-0.parquet", root / "data/apple/nul.parquet"
+        ),
+        (
+            "data/apple/nul.parquet: is not where the format puts a frames file "
+            r"\(data/<object_type>/<episode_uid>.parquet\): its episode id 'nul' "
+            "must not be a device name"
+        ),
+    ),
+    (
         lambda root: (root / "trajectories/banana/ep-1.parquet").unlink(),
-        "trajectories/banana/ep-1.parquet is missing",
+        "data/banana/ep-1.parquet: its trajectory trajectories/banana/ep-1.parquet is not on disk",
     ),
     (
         lambda root: shutil.copy(
             root / "trajectories/banana/ep-1.parquet",
             root / "trajectories/banana/ep-7.parquet",
         ),
-        "trajectories/banana/ep-7.parquet belongs to no episode",
+        "trajectories/banana/ep-7.parquet: belongs to no episode: data/banana/ep-7.parquet is not on disk",
     ),
     (
         lambda root: rewrite(root / "data/apple/ep-0.parquet", lambda t, f: (t, None)),
@@ -1151,26 +1276,26 @@ FINALIZE_REFUSALS = [
             root / "data/apple/ep-0.parquet",
             lambda t, f: (t, {**f, "format_version": "1.0"}),
         ),
-        "data/apple/ep-0.parquet is not physgraspgen-public 2.0",
+        "data/apple/ep-0.parquet: format_version is '1.0', not '2.0'",
     ),
     (
         lambda root: rewrite(
             root / "data/apple/ep-0.parquet",
             lambda t, f: (t, {k: v for k, v in f.items() if k != "video"}),
         ),
-        r"its metadata lacks \['video'\]",
+        r"data/apple/ep-0.parquet: metadata keys \['video'\] are missing",
     ),
     (
         lambda root: shutil.copy(
             root / "data/apple/ep-0.parquet", root / "data/apple/ep-5.parquet"
         ),
-        "data/apple/ep-5.parquet holds episode ep-0 of apple",
+        "data/apple/ep-5.parquet: holds episode 'ep-0' of 'apple', not 'ep-5' of 'apple'",
     ),
     (
         lambda root: write_episode(
             GraspDataRecorder(root, make_spec()), uid="ep-0", object_type="cherry"
         ),
-        "episode ep-0 is under two object types",
+        "data/cherry/ep-0.parquet: episode ep-0 is also the episode of data/apple/ep-0.parquet",
     ),
     (
         lambda root: write_episode(
@@ -1192,22 +1317,26 @@ FINALIZE_REFUSALS = [
             root / "data/apple/ep-0.parquet",
             lambda t, f: (t, {**f, "facts": {**f["facts"], "lighting": {}}}),
         ),
-        "facts.lighting holds no value but null",
+        "data/apple/ep-0.parquet: metadata facts.lighting holds no value but null",
     ),
     (
         lambda root: shutil.copy(
             root / "trajectories/banana/ep-1.parquet",
             root / "trajectories/apple/ep-0.parquet",
         ),
-        "trajectories/apple/ep-0.parquet: its metadata differs from the frames file's",
+        (
+            "trajectories/apple/ep-0.parquet: its physgraspgen metadata is not that of "
+            r"data/apple/ep-0.parquet \(it differs in \['episode_uid', 'n_frames', "
+            r"'n_steps', 'object_asset', 'object_type'\]\)"
+        ),
     ),
     (
         _swap_trajectory_of_an_earlier_write,
-        r"its metadata differs from the frames file's in \['label'\]",
+        r"is not that of data/apple/ep-0.parquet \(it differs in \['label'\]\)",
     ),
     (
         lambda root: rewrite(root / "data/apple/ep-0.parquet", _drop_last_frame),
-        "holds 4 frames, its metadata says 5",
+        "data/apple/ep-0.parquet: metadata n_frames is 5 but the file has 4 rows",
     ),
     (
         lambda root: rewrite(root / "trajectories/apple/ep-0.parquet", _drop_last_step),
@@ -1219,35 +1348,35 @@ FINALIZE_REFUSALS = [
     ),
     (
         lambda root: _footers(root, lambda f: {**f, "object_asset": 5}),
-        "data/apple/ep-0.parquet: its object_asset is not a nonempty string",
+        "data/apple/ep-0.parquet: metadata object_asset is 5, not a nonempty string",
     ),
     (
         lambda root: _footers(root, lambda f: {**f, "image_size": {"front": {}}}),
-        "its metadata does not describe its columns: KeyError",
+        "data/apple/ep-0.parquet: metadata image_size is {'front': {}}, not the height",
     ),
     (
         lambda root: _footers(root, lambda f: {**f, "label": "won"}),
-        "data/apple/ep-0.parquet: its label 'won' is not one of",
+        "data/apple/ep-0.parquet: metadata label is 'won', not one of success, fracture",
     ),
     (
         lambda root: _footers(root, lambda f: {**f, "n_tets": "5"}),
-        "data/apple/ep-0.parquet: its n_tets is not a positive integer: '5'",
+        "data/apple/ep-0.parquet: metadata n_tets is '5', not an integer of at least 1",
     ),
     (
         lambda root: _footers(root, lambda f: {**f, "n_steps": 0}),
-        "data/apple/ep-0.parquet: its n_steps is not a positive integer: 0",
+        "data/apple/ep-0.parquet: metadata n_steps is 0, not an integer of at least 1",
     ),
     (
         lambda root: _footers(root, lambda f: {**f, "fps": True}),
-        "data/apple/ep-0.parquet: its fps is not a positive integer: True",
+        "data/apple/ep-0.parquet: metadata fps is True, not an integer of at least 1",
     ),
     (
         lambda root: _footers(root, lambda f: {**f, "fps": 7}),
-        "data/apple/ep-0.parquet: its fps 7 does not divide its recorded_fps",
+        "data/apple/ep-0.parquet: metadata fps 7 does not divide recorded_fps 60",
     ),
     (
         lambda root: _footers(root, lambda f: {**f, "ffmpeg_version": "ffmpeg 8"}),
-        "without rgb, its video and ffmpeg_version must be null",
+        "metadata ffmpeg_version is 'ffmpeg 8', not null without rgb",
     ),
     (
         lambda root: _footers(
@@ -1259,7 +1388,7 @@ FINALIZE_REFUSALS = [
                 "ffmpeg_version": None,
             },
         ),
-        "with rgb, its video must be a mapping and its ffmpeg_version a string",
+        "metadata ffmpeg_version is None, not a nonempty string with rgb",
     ),
     (
         lambda root: _footers(
@@ -1271,39 +1400,48 @@ FINALIZE_REFUSALS = [
                 "ffmpeg_version": "ffmpeg 8",
             },
         ),
-        "data/apple/ep-0.parquet: with rgb, its video must be a mapping",
+        "data/apple/ep-0.parquet: metadata video is 'av1', not the settings of an encoding",
     ),
     (
         lambda root: rewrite(root / "data/apple/ep-0.parquet", lambda t, f: (t, [f])),
-        "data/apple/ep-0.parquet: its physgraspgen metadata is not a mapping",
+        "data/apple/ep-0.parquet: its physgraspgen metadata is not a JSON object",
     ),
     (
         lambda root: rewrite(
             root / "trajectories/apple/ep-0.parquet", lambda t, f: (t, [])
         ),
-        "trajectories/apple/ep-0.parquet: its physgraspgen metadata is not a mapping",
+        "trajectories/apple/ep-0.parquet: its physgraspgen metadata is not a JSON object",
     ),
     (
         lambda root: rewrite(
             root / "data/apple/ep-0.parquet",
             _field_metadata("camera.front.intrinsics", {"shape": "[9]"}),
         ),
-        r"the field metadata of \['camera.front.intrinsics'\] is not the format's",
+        (
+            r"column camera.front.intrinsics has the field metadata "
+            r"\{'shape': '\[9\]'\}, not \{'shape': '\[3, 3\]'\}"
+        ),
     ),
     (
         lambda root: rewrite(
             root / "data/apple/ep-0.parquet",
             _field_metadata("depth.wrist.depth_m", None),
         ),
-        r"the field metadata of \['depth.wrist.depth_m'\] is not the format's",
+        r"column depth.wrist.depth_m has the field metadata \{\}, not \{'shape': '\[64, 96\]'\}",
     ),
-    (_damage_a_page, "data/apple/ep-0.parquet: cannot be read"),
+    (
+        _damage_a_page,
+        (
+            "data/apple/ep-0.parquet: cannot be read: OSError: could not verify page "
+            "integrity, CRC checksum verification failed"
+        ),
+    ),
     (
         lambda root: rewrite(
             root / "data/apple/ep-0.parquet",
             lambda t, f: (t.append_column("extra", pa.array([0] * t.num_rows)), f),
         ),
-        "data/apple/ep-0.parquet: its columns are not the format's",
+        r"data/apple/ep-0.parquet: columns \['extra'\] are not in the format",
     ),
     (
         lambda root: rewrite(
@@ -1317,7 +1455,7 @@ FINALIZE_REFUSALS = [
                 f,
             ),
         ),
-        "trajectories/apple/ep-0.parquet: its columns are not the format's",
+        "trajectories/apple/ep-0.parquet: column robot.waypoint is int64, not int32",
     ),
 ]
 
@@ -1337,7 +1475,14 @@ def test_finalize_refuses_what_the_format_does_not_describe(tmp_path, damage, me
 def test_finalize_replaces_the_part_files_of_a_finalize_that_was_stopped(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     write_episode(recorder)
-    for name in ("metadata.yaml.part", "SHA256SUMS.part", ".gitattributes.part"):
+    (tmp_path / "tools").mkdir()
+    for name in (
+        "metadata.yaml.part",
+        "SHA256SUMS.part",
+        ".gitattributes.part",
+        "tools/check_dataset.py.part",
+        "tools/check_criteria.yaml.part",
+    ):
         (tmp_path / name).write_text("half written\n")
     recorder.finalize()
     assert files_under(tmp_path) == [
@@ -1345,6 +1490,8 @@ def test_finalize_replaces_the_part_files_of_a_finalize_that_was_stopped(tmp_pat
         "SHA256SUMS",
         "data/apple/ep-0.parquet",
         "metadata.yaml",
+        "tools/check_criteria.yaml",
+        "tools/check_dataset.py",
         "trajectories/apple/ep-0.parquet",
     ]
 
@@ -1358,7 +1505,8 @@ def test_finalize_refuses_object_types_that_differ_in_case(tmp_path):
     message = (
         r"object types \['Apple', 'apple'\] are one type in lower case"
         if sensitive
-        else "data/Apple/ep-1.parquet holds episode ep-1 of apple"
+        else "data/Apple/ep-1.parquet: holds episode 'ep-1' of 'apple', not 'ep-1' of "
+        "'Apple'"
     )
     with pytest.raises(DatasetError, match=message):
         recorder.finalize()
@@ -1804,20 +1952,23 @@ def test_read_video_refuses_a_damaged_video(tmp_path):
         (minimal_mp4(4, handler=b"soun"), "holds 0 video tracks, not one"),
         (
             minimal_mp4(4, mdhd=_box(b"mdhd", b"")),
-            "cannot be read: a truncated mdhd box",
+            "its MP4 index cannot be read: a truncated mdhd box",
         ),
         (
             minimal_mp4(4, descriptions=2),
-            "cannot be read: a video track with 2 sample descriptions",
+            "its MP4 index cannot be read: a video track with 2 sample descriptions",
         ),
         (
             minimal_mp4(4, entry=sample_entry(av1c=False)),
-            "cannot be read: an av01 sample entry without an av1C box",
+            "its MP4 index cannot be read: an av01 sample entry without an av1C box",
         ),
         (
             minimal_mp4(4, runs=[(3, 512), (1, 1024)]),
             "does not run at a constant 30 fps",
         ),
+        (minimal_mp4(4, edits=[(66, 0, 1, 0)]), "its edit list does not play every"),
+        # The same index around other frames: not the video the episode was written with.
+        (minimal_mp4(4, payload=b"other frames"), "is not the video its episode was"),
     ],
 )
 def test_finalize_refuses_a_video_that_is_not_the_cameras(tmp_path, mp4, message):
@@ -1842,7 +1993,7 @@ def test_finalize_reports_metadata_that_does_not_describe_a_video(tmp_path):
     _footers(root, lambda f: {**f, "image_size": {}})
     with pytest.raises(
         DatasetError,
-        match="front/apple/ep-0.mp4: its metadata does not describe it: KeyError",
+        match=r"data/apple/ep-0.parquet: metadata image_size is \{\}, not the height",
     ):
         recorder.finalize()
 

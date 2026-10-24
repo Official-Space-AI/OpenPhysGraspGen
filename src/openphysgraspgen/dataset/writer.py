@@ -900,7 +900,12 @@ class GraspDataRecorder:
         doi: str | None = None,
         download_url: str | None = None,
         workers: int = 1,
+        criteria: str | Path | None = None,
     ) -> dict[str, Any]:
         return finalize_dataset(
-            self.root, doi=doi, download_url=download_url, workers=workers
+            self.root,
+            doi=doi,
+            download_url=download_url,
+            workers=workers,
+            criteria=criteria,
         )
