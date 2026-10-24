@@ -149,10 +149,9 @@ deformation gradient (N, T, 3, 3).
 
 ## Trajectory file
 
-`trajectories/<object_type>/<episode_uid>.parquet` has one row per recorded simulation step, from
-step 1 to the last, consecutive, so it keeps the steps that the published frame rate skips. It
-covers every frame's step. It holds what benchmark scoring and control learning read, and no
-images.
+`trajectories/<object_type>/<episode_uid>.parquet` has one row per recorded simulation step,
+consecutive from step 1, so it keeps the steps that the published frame rate skips. It covers every
+frame's step. It holds what benchmark scoring and control learning read, and no images.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -260,11 +259,12 @@ refuses the dataset. It refuses it when:
 - a file under the root is not part of the layout (an interrupted episode leaves `.part` files),
   or an episode's file is missing, or a file belongs to no episode;
 - an episode's metadata is not a mapping, is not `physgraspgen-public` 2.0, lacks a key, names
-  another episode or object type than its path, has an `object_asset` that is not a nonempty
-  string, a `label` the format does not list, an `n_frames`, `n_steps`, `n_tets`, `fps` or
-  `recorded_fps` that is not a positive integer, or an `fps` that does not divide `recorded_fps`,
-  does not describe its columns, has a `video` and an `ffmpeg_version` that are not a mapping and
-  a string with `rgb` and null without it, or lacks a kind of `facts`;
+  another episode or object type than its path, does not describe its columns, or lacks a kind of
+  `facts`;
+- an episode's `object_asset` is not a nonempty string, its `label` is not one the format lists,
+  its `n_frames`, `n_steps`, `n_tets`, `fps` or `recorded_fps` is not a positive integer, its `fps`
+  does not divide its `recorded_fps`, or its `video` and `ffmpeg_version` are not a mapping and a
+  string with `rgb` and both null without it;
 - one episode id is under two object types;
 - episodes disagree on a key that every episode must state alike (see Episode metadata);
 - two object types are one after lower-casing and stripping (`apple`, `Apple`), or one
