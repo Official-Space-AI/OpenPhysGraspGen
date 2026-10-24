@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """PG-T1: the portable test vectors of the scoring rules and their edge cases.
 
-Every episode is synthetic, written with GraspDataRecorder, read back through the
-dataset reader and scored as the command scores it; a few edge cases the writer refuses
-to write are scored from columns in memory.
+Every episode is synthetic. The vectors and the dataset cases are written with
+GraspDataRecorder, read back through the dataset reader and scored as the command scores
+them; the edge cases are scored from columns in memory by the same function.
 """
 
 import json
@@ -182,13 +182,15 @@ def put_down(
     touch_after_open=None,
     wander=None,
     truncate=None,
+    path=None,
 ):
+    """path(i) moves the tool off its plan on the rows where it is not None."""
     phases = TASKS[task].phases
     fall = fall or (lambda k: min(clearance, clearance * k / 3.0))
     rows, settled = [], None
     n = sum(CP)
     for i, w in enumerate(waypoints(CP)):
-        t = tool(i, clearance)
+        t = (path(i) if path else None) or tool(i, clearance)
         if i < STARTS[4]:
             centroid, width = REST, OPEN
         elif open_at is None or i < open_at:
@@ -230,26 +232,30 @@ def put_down(
     return rows[:truncate]
 
 
-def put_back(*, fall=0.0, drift=0.0, never_open=False):
-    """lift_hold_place: lift 15 cm, hold, lower with the tool and let go where it rested."""
+def put_back(*, fall=0.0, drift=0.0, never_open=False, drop=False, schedule=LHP):
+    """lift_hold_place: lift 15 cm, hold, lower with the tool and let go where it rested;
+    with drop the object falls out of the jaws as the tool starts down."""
     phases = TASKS["lift_hold_place"].phases
-    starts = [sum(LHP[:k]) for k in range(len(LHP))]
+    starts = [sum(schedule[:k]) for k in range(len(schedule))]
     rows = []
-    for i, w in enumerate(waypoints(LHP)):
+    for i, w in enumerate(waypoints(schedule)):
         if w == 0:
             z_tool, r = 0.22, 0.0
         elif w == 1:
-            z_tool, r = 0.22 - 0.17 * (i - starts[1] + 1) / 30, 0.0
+            z_tool, r = 0.22 - 0.17 * (i - starts[1] + 1) / schedule[1], 0.0
         elif w == 2:
             z_tool, r = 0.05, 0.0
         elif w == 3:
-            u = (i - starts[3] + 1) / 30
+            u = (i - starts[3] + 1) / schedule[3]
             z_tool, r = 0.05 + 0.17 * u, 0.15 * u
         elif w == 4:
             z_tool, r = 0.22, 0.15
         elif w == 5:
-            u = (i - starts[5] + 1) / 30
+            k = i - starts[5] + 1
+            u = k / schedule[5]
             z_tool, r = 0.22 - 0.17 * u, 0.15 * (1.0 - u)
+            if drop:
+                r = max(0.0, 0.15 - 0.5 * 9.81 * (k / 60) ** 2)
         else:
             z_tool = 0.05
             r = max(0.0, fall * (1.0 - min(1.0, (i - starts[6] + 1) / 3.0)))
@@ -897,6 +903,9 @@ def test_a_dataset_report_states_what_it_scored(vectors):
         (9, 16, [0.331785563988119, 0.7690134759450765]),
         (900, 1000, [0.8798480368046516, 0.9170905564069044]),
         (10, 100, [0.0552291370606751, 0.17436566150491345]),
+        # Clipped: unclipped, these bounds round to 1.0000000000000002 and -1.4e-17.
+        (16, 16, [0.8063923194655637, 1.0]),
+        (0, 21, [0.0, 0.154639018924847]),
     ],
 )
 def test_the_wilson_interval_matches_its_vectors(k, m, expected):
@@ -916,7 +925,7 @@ def score(rows, task_block, **meta):
 
 @pytest.mark.parametrize(
     ("top", "up"),
-    [(0.05, True), (0.05 - 0.5e-9, True), (0.05 - 2e-9, False)],
+    [(0.05, True), (0.05 - 0.5e-9, True), (0.05 - 1e-9, True), (0.05 - 2e-9, False)],
 )
 def test_criterion_c_reaches_its_rise_within_the_tie(top, up):
     record = score(
@@ -924,6 +933,55 @@ def test_criterion_c_reaches_its_rise_within_the_tie(top, up):
     )
     assert record["C"]["lifted"] is up
     assert record["C"]["agreement"]["reason"] == (None if up else "never_crossed")
+
+
+@pytest.mark.parametrize(
+    ("clearance", "up"),
+    [(0.005, True), (0.005 - 0.5e-9, True), (0.005 - 2e-9, False)],
+)
+def test_criterion_c_needs_the_lowest_point_5_mm_up_within_the_tie(clearance, up):
+    # The centroid rises 15 cm, the lowest point only clearance.
+    rows = ramp("search_lift_hold_2s", S2, 0.15, bottom_frac=clearance / 0.15)
+    record = score(rows, block("search_lift_hold_2s", S2))
+    assert record["C"]["lifted"] is up
+    assert record["C"]["agreement"]["reason"] == (None if up else "never_crossed")
+    assert record["B"]["lifted"] is True
+
+
+def test_criterion_c_waits_for_the_lowest_point():
+    # The lowest point rises a twentieth of the centroid's rise: 5 mm at row 259, ten
+    # rows after the centroid's 5 cm.
+    rows = ramp("search_lift_hold", S4, 0.15, bottom_frac=0.05)
+    record = score(rows, block("search_lift_hold", S4))
+    agreement = record["C"]["agreement"]
+    assert (agreement["first_up_frame"], agreement["window_end_frame"]) == (259, 378)
+    assert record["C"]["held"] is True
+
+
+def supported(r, clearance=0.004):
+    """The row with the object's lowest point back within clearance of its rest."""
+    low = r["object.bbox_min"]
+    return dict(r, **{"object.bbox_min": (low[0], low[1], 0.01 + clearance)})
+
+
+def test_a_lowest_point_back_near_the_bench_inside_the_window_is_still_supported():
+    rows = ramp("search_lift_hold", S4, 0.15)
+    rows[300] = supported(rows[300])  # inside C's window, rows 249 to 368
+    record = score(rows, block("search_lift_hold", S4))
+    c, b = record["C"], record["B"]
+    assert (c["lifted"], c["held"]) == (True, False)
+    assert c["agreement"]["reason"] == "still_supported"
+    assert c["agreement"]["min_bottom_clearance_in_window_m"] == pytest.approx(0.004)
+    assert (c["class"], c["reasons"]) == ("dropped", ["still_supported"])
+    assert (b["lifted"], b["held"], b["class"]) == (True, True, "success")
+
+
+def test_a_centroid_dip_in_the_window_outranks_a_supported_row():
+    rows = ramp("search_lift_hold", S4, 0.15, dips=[(320, 1, 0.12)])
+    rows[300] = supported(rows[300])
+    record = score(rows, block("search_lift_hold", S4))
+    assert record["C"]["agreement"]["reason"] == "dipped_in_window"
+    assert record["C"]["reasons"] == ["dipped_in_window"]
 
 
 def test_criterion_b_has_no_tie():
@@ -992,12 +1050,33 @@ def test_another_recorded_rate_sizes_both_windows(tmp_path):
     assert report["status"] == "ok"
 
 
+@pytest.mark.parametrize(
+    ("hold", "c", "b"),
+    [(118, False, False), (119, True, False), (239, True, False), (240, True, True)],
+)
+def test_a_window_is_decidable_when_it_ends_inside_the_plan(hold, c, b):
+    # 270 rows come before the hold: C's window needs 270 + 120 - 1 rows, B's 270 + 240.
+    schedule = [*S4[:-1], hold]
+    rows = ramp("search_lift_hold", schedule, 0.15)
+    record = score(rows, block("search_lift_hold", schedule))
+    assert record["decidable"] == {"C": c, "B": b}
+
+
 def test_the_retry_task_reads_every_row():
     record = score(retry(second_top=0.1), block("lift_hold_retry", RETRY))
     assert record["B"]["lifted"] is True
     assert record["B"]["crossing"] < sum(RETRY[:5])
     assert record["B"]["held"] is False
     assert record["C"]["lifted"] is True
+
+
+def test_the_retry_task_judges_the_lift_of_the_attempt_it_ended_in():
+    # One attempt, held to its end, the lowest point never off the bench: no row is up,
+    # and that attempt's lift is complete although the plan holds a second lift.
+    rows = [supported(r, 0.0) for r in retry(first_drop=False)]
+    record = score(rows, block("lift_hold_retry", RETRY))
+    assert record["C"]["lifted"] is False
+    assert record["C"]["agreement"]["reason"] == "never_crossed"
 
 
 def test_the_put_back_returns_the_object_where_it_rested():
@@ -1019,6 +1098,141 @@ def test_a_missing_commanded_width_is_no_width():
     rows[end] = dict(rows[end], **{"robot.gripper_width_cmd_m": math.nan})
     placed = score(rows, task)["placed_task"]
     assert (placed["verdict"], placed["why"]) == (None, "no_grip_width")
+
+
+def widened(rows, first, last, width):
+    """The rows with the commanded width set to width on rows first to last."""
+    return [
+        dict(r, **{"robot.gripper_width_cmd_m": width}) if first <= i <= last else r
+        for i, r in enumerate(rows)
+    ]
+
+
+def moved_at(rows, at, dx):
+    """The rows with the object moved dx along x on row at."""
+    return [
+        dict(r, **{k: (r[k][0] + dx, *r[k][1:]) for k in OBJECT}) if i == at else r
+        for i, r in enumerate(rows)
+    ]
+
+
+# The put-back's hold ends at row 354, 240 rows after the crossing; the place waypoints
+# start at rows 360 and 390, where the jaws open; its last 10 rows are 440 to 449.
+@pytest.mark.parametrize(
+    ("rows", "verdict", "reasons", "why"),
+    [
+        (put_back(drop=True), False, ["descent_not_with_tool"], None),
+        (moved_at(put_back(), 440, 0.003), False, ["not_at_rest"], None),
+        (moved_at(put_back(), 439, 0.003), True, [], None),
+        (widened(put_back(), 370, 370, 0.05 + 2e-6), False, ["fell_on_release"], None),
+        (widened(put_back(), 370, 370, 0.05 + 0.5e-6), True, [], None),
+        (widened(put_back(), 356, 389, 0.12), None, [], "too_few_carried_rows"),
+        (
+            widened(put_back(), 357, 389, 0.12),
+            False,
+            ["descent_not_with_tool", "fell_on_release"],
+            None,
+        ),
+    ],
+)
+def test_each_put_back_bound(rows, verdict, reasons, why):
+    placed = score(rows, block("lift_hold_place", LHP))["placed_task"]
+    assert (placed["verdict"], placed["reasons"], placed["why"]) == (
+        verdict,
+        reasons,
+        why,
+    )
+
+
+def dragged(height):
+    """A tool that lowers the object to height over the bench 5 cm short of the mat at
+    row 500 and drags it there by row 600."""
+    return lambda i: (
+        (0.5, 0.10 + 0.05 * (i - 500) / 100, Z_CLOSE + height)
+        if 500 <= i < 600
+        else None
+    )
+
+
+def set_down_fast(i):
+    """A tool that keeps the hold height until row 580, then comes straight down to the
+    bench in 20 rows."""
+    if 540 <= i < 600:
+        return (*tool(i)[:2], Z_CLOSE + 0.17 * min(1.0, (599 - i) / 20))
+    return None
+
+
+def pushed(dx):
+    return lambda i: (dx * clamp((i - 650) / 20), 0.0)
+
+
+@pytest.mark.parametrize(
+    ("rows", "verdict", "reasons", "fact", "value"),
+    [
+        (put_down(path=dragged(0.003)), False, ["dragged"], "dragged_max_m", 0.0495),
+        (put_down(path=dragged(0.02)), True, [], "dragged_max_m", 0.0),
+        (
+            put_down(clearance=0.018, slip=lambda i: 0.015 * clamp((i - 400) / 3)),
+            False,
+            ["came_down_fast"],
+            "came_down_excess_max_m",
+            0.015,
+        ),
+        (
+            put_down(clearance=0.0, path=set_down_fast),
+            False,
+            ["set_down_too_fast"],
+            "set_down_speed_m_s",
+            0.51,
+        ),
+        (
+            put_down(shove=pushed(0.011)),
+            False,
+            ["pushed_after_release"],
+            "push_after_release_m",
+            0.011,
+        ),
+        (put_down(shove=pushed(0.009)), True, [], "push_after_release_m", 0.009),
+    ],
+)
+def test_each_put_down_bound(rows, verdict, reasons, fact, value):
+    placed = score(rows, block(CARRY, CP))["placed_task"]
+    assert (placed["verdict"], placed["reasons"], placed["why"]) == (
+        verdict,
+        reasons,
+        None,
+    )
+    assert placed["facts"][fact] == pytest.approx(value, abs=1e-9)
+
+
+def test_a_carry_the_recording_cuts_before_the_jaws_open_is_not_judged():
+    record = score(put_down(truncate=520), block(CARRY, CP))
+    placed = record["placed_task"]
+    assert (placed["verdict"], placed["why"]) == (None, "carry_not_judgeable")
+    assert placed["facts"]["carry_slip_max_m"] is None
+    assert (record["B"]["held"], record["B"]["placed"]) == (True, None)
+    assert record["B"]["reasons"] == ["carry_not_judgeable"]
+
+
+def test_placed_counts_under_a_criterion_only_once_it_held():
+    # The 10 cm put-down holds its own 3.0 s, then slips 8 cm in the jaws inside B's 4 s.
+    rows = put_down(task=CARRY_10CM, slip=lambda i: 0.08 if 470 <= i < 475 else 0.0)
+    record = score(rows, block(CARRY_10CM, CP))
+    placed = record["placed_task"]
+    assert (placed["verdict"], placed["reasons"]) == (False, ["slipped_in_jaws"])
+    assert (record["C"]["held"], record["B"]["held"]) == (True, False)
+    assert (record["C"]["placed"], record["B"]["placed"]) == (False, None)
+    assert (record["C"]["class"], record["B"]["class"]) == ("not_placed", "dropped")
+
+
+def test_the_put_down_is_anchored_on_the_generator_threshold():
+    # The object hangs 6 cm low in the jaws: it rises 11 cm, and the tool stops 6 cm
+    # higher to set it down 3 mm over the bench.
+    rows = put_down(clearance=0.063, slip=lambda i: 0.06)
+    record = score(rows, block(CARRY, CP, judge={"lift_success_m": 0.10}))
+    assert record["placed_task"]["verdict"] is True
+    assert (record["C"]["placed"], record["C"]["class"]) == (True, "success")
+    assert (record["B"]["lifted"], record["B"]["class"]) == (False, "not_lifted")
 
 
 def test_several_put_down_failures_are_each_counted(tmp_path):
@@ -1254,6 +1468,25 @@ def test_scores_are_pooled_over_object_types_and_given_per_type(tmp_path):
     assert entry["overall"]["B"]["lifted"]["of_all"] == pytest.approx(2 / 3)
     assert entry["by_object_type"]["banana"]["B"]["lifted"]["of_all"] == 0.5
     assert entry["by_object_type"]["apple"]["n"] == 1
+
+
+def test_the_task_score_is_taken_over_the_decidable_episodes(tmp_path):
+    # Planned with a 100-row hold, B's window does not fit the second recording.
+    short = [*LHP[:4], 100, *LHP[5:]]
+    write(
+        tmp_path,
+        [
+            episode("ep-0", put_back(), block("lift_hold_place", LHP)),
+            episode("ep-1", put_back(schedule=short), block("lift_hold_place", short)),
+        ],
+    )
+    report, records = scored(tmp_path)
+    assert [records[u]["decidable"]["B"] for u in ("ep-0", "ep-1")] == [True, False]
+    assert all(records[u]["placed_task"]["verdict"] for u in ("ep-0", "ep-1"))
+    table = report["tasks"]["lift_hold_place"]["overall"]
+    c, b = table["C"], table["B"]
+    assert (b["lifted"]["of_all"], b["held"]["undecidable"]) == (1.0, 1)
+    assert b["task_score"] == c["task_score"] == 1.0
 
 
 # --- the check against the generator's verdicts ---------------------------------------------
