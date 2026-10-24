@@ -1183,6 +1183,17 @@ def test_finalize_states_no_classes_without_masks(tmp_path):
     assert metadata["channels"] == list(channels)
 
 
+def test_finalize_writes_metadata_the_check_reads_from_the_deepest_footer(tmp_path):
+    # metadata.yaml holds a provenance record three levels below where a footer holds
+    # it: a footer of 32 levels makes a metadata.yaml of 34, within the 64 it may have.
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    provenance = nested(31)
+    write_episode(recorder, generation_provenance=provenance)
+    recorder.finalize()
+    metadata, _ = fmt.read_metadata(tmp_path)
+    assert metadata["provenance"]["generation"] == [provenance]
+
+
 def test_the_card_front_matter_declares_each_table(tmp_path):
     text = card_front_matter()
     assert text.startswith("---\n") and text.endswith("---\n")

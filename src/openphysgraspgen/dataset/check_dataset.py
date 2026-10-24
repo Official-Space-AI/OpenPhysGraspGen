@@ -296,6 +296,9 @@ INT64 = (-(2**63), 2**63 - 1)
 # How many levels the episode metadata's objects and arrays may nest, the footer's own
 # object the first: every Python then reads and walks a footer alike.
 MAX_NESTING = 32
+# The same for metadata.yaml and the criteria file, with room for the footer values
+# metadata.yaml repeats a few levels down.
+MAX_YAML_NESTING = 2 * MAX_NESTING
 
 CONVENTIONS = {
     "units": "SI: metres, seconds, newtons, pascals, radians",
@@ -1426,9 +1429,16 @@ class _RepeatedKey(Exception):
 
 def load_yaml(data: bytes, what: str) -> Any:
     """A YAML document from its bytes as PyYAML's safe loader reads it (its C loader when
-    there is one), refusing a key repeated in a mapping: parsers disagree on which of
-    the two values counts. what names the file in a refusal."""
+    there is one), refusing a key repeated in a mapping, as parsers disagree on which of
+    the two values counts, and a document nested deeper than MAX_YAML_NESTING levels.
+    what names the file in a refusal."""
     yaml = _yaml()
+    steps = {
+        yaml.MappingStartEvent: 1,
+        yaml.SequenceStartEvent: 1,
+        yaml.MappingEndEvent: -1,
+        yaml.SequenceEndEvent: -1,
+    }
 
     class Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
         def construct_mapping(self, node: Any, deep: bool = False) -> Any:
@@ -1445,7 +1455,16 @@ def load_yaml(data: bytes, what: str) -> Any:
             return super().construct_mapping(node, deep=deep)
 
     try:
-        return yaml.load(data.decode("utf-8"), Loader=Loader)
+        text = data.decode("utf-8")
+        # Counted from the parser's events before the document is composed: the parser
+        # keeps a stack of its own, while libyaml composes by recursion in C, which a
+        # deep enough document overflows.
+        depth = 0
+        for event in yaml.parse(text, Loader=Loader):
+            depth += steps.get(type(event), 0)
+            if depth > MAX_YAML_NESTING:
+                raise CheckError(f"{what} nests deeper than {MAX_YAML_NESTING} levels")
+        return yaml.load(text, Loader=Loader)
     except _RepeatedKey as exc:
         raise CheckError(
             f"{what} repeats the key {exc.key!r} (line {exc.line})"

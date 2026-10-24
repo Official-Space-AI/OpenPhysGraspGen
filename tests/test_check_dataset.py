@@ -640,6 +640,11 @@ def test_criteria_values_are_refused_before_any_file_is_read(
         ),
         ("scale: !!python/object:os.system {}\n", "is not valid YAML"),
         ("\xff", "is not valid YAML"),
+        pytest.param(
+            "scale: " + "[" * 64 + "]" * 64 + "\n",
+            "nests deeper than 64 levels",
+            id="65-levels",
+        ),
     ],
 )
 def test_a_criteria_file_that_is_not_one_is_refused(tmp_path, text, message):
@@ -787,6 +792,30 @@ def test_a_root_that_is_not_a_dataset_is_refused(root, tmp_path, capsys):
     assert message == (
         f"criteria file {tmp_path / CRITERIA} does not exist (pass --criteria)"
     )
+
+
+def test_a_yaml_file_nests_at_most_64_levels():
+    def deep(depth):
+        # A mapping holding lists: depth levels in all.
+        return ("a: " + "[" * (depth - 1) + "]" * (depth - 1) + "\n").encode()
+
+    value = fmt.load_yaml(deep(64), "metadata")["a"]
+    for _ in range(62):
+        (value,) = value
+    assert value == []
+    with pytest.raises(fmt.CheckError, match="^metadata nests deeper than 64 levels$"):
+        fmt.load_yaml(deep(65), "metadata")
+
+
+@POSIX
+def test_a_metadata_yaml_too_deep_to_compose_is_refused(root):
+    # libyaml composes by recursion in C, which this many levels overflow: the
+    # interpreter would crash without a RESULT line had the depth not been counted first.
+    (root / "metadata.yaml").write_text("a: " + "[" * 200_000 + "]" * 200_000 + "\n")
+    code, out, _, payload = run(root, root, "--seed", SEED)
+    assert code == 2, out
+    assert payload["reason"].startswith("metadata ")
+    assert payload["reason"].endswith("metadata.yaml nests deeper than 64 levels")
 
 
 @pytest.mark.parametrize(
