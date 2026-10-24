@@ -33,13 +33,17 @@ one definition. Version 2.0 replaces an unpublished HDF5 draft (1.0) with Parque
   data/<object_type>/<episode_uid>.parquet           frames: every channel except RGB
   trajectories/<object_type>/<episode_uid>.parquet   robot and object state at the recorded rate
   videos/<camera>/<object_type>/<episode_uid>.mp4    RGB of one camera
-  tools/check_dataset.py                             the check script (issue #19)
-  tools/check_criteria.yaml                          the acceptance values it applies (issue #19)
+  tools/check_dataset.py                             the check script (see The check)
+  tools/check_criteria.yaml                          the acceptance values it applies
 ```
 
 One episode is one frames file, one trajectory file and one video per camera. Files are grouped
-by object type, so each type can be exported, uploaded and downloaded on its own. Object types,
-episode ids and camera names match `[A-Za-z0-9][A-Za-z0-9._-]*`.
+by object type, so each type can be exported, uploaded and downloaded on its own. Object types
+and episode ids become path components, so that every file system a copy lands on can hold them:
+each matches `[A-Za-z0-9][A-Za-z0-9._-]*`, has at most 100 characters, does not end in a dot, and
+is no device name that Windows reserves (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to
+`LPT9`, with or without a suffix). No two paths of a dataset differ only in case. The cameras are
+`front` and `wrist`.
 
 ### Dataset card
 
@@ -118,8 +122,9 @@ exactly the columns of its table. `check_dataset.frame_schema(channels, cameras,
 column order included.
 
 Image sizes are fixed per camera for the whole dataset and stated in `metadata.yaml` and in every
-episode's metadata. The tetrahedron count T is fixed per episode and stated in the episode
-metadata. No column holds nulls.
+episode's metadata; an image holds at most 2,147,483,647 pixels, the size of an Arrow list. The
+tetrahedron count T is fixed per episode and stated in the episode metadata. No column holds a
+null, and neither does any list in a column.
 
 Each fixed list and per-tetrahedron column carries the shape of one row's value in its Arrow field
 metadata (`shape`): `[H, W]` for images, `[3, 3]` and `[4, 4]` for the camera matrices, `[n]` for
@@ -146,6 +151,9 @@ deformation gradient (N, T, 3, 3).
 - `robot.phase` is a nonempty string, here and in the trajectory.
 - A mask value is the index of a segmentation class, 0 to 5. Depth and `stress.volume_ratio` have
   no rule beyond their type.
+- A frame's `robot` and `object` columns, and its two force magnitudes, hold the trajectory's
+  values at the frame's step, NaN where the trajectory's is NaN. A frame therefore lies on a step
+  whose object state is finite.
 
 ## Trajectory file
 
@@ -178,28 +186,30 @@ breaks these rules cannot be written.
 
 ## Episode metadata
 
-Both Parquet files of an episode carry the same metadata as JSON under the footer key
-`physgraspgen`, with these keys:
+Both Parquet files of an episode carry the same metadata, byte for byte, as JSON under the footer
+key `physgraspgen`. The JSON is strict: UTF-8, one object, no key repeated in an object, floats
+that are finite and integers that fit int64. It holds exactly these keys:
 
 | Key | Meaning |
 |---|---|
 | `format`, `format_version` | `physgraspgen-public`, `2.0` |
-| `dataset_name`, `dataset_version` | the dataset the episode was written for |
+| `dataset_name`, `dataset_version` | the dataset the episode was written for, nonempty strings |
 | `license` | `CC-BY-4.0` |
-| `episode_uid`, `object_type`, `object_asset` | the episode, its object type (the value the diversity item counts) and the object's geometry asset |
+| `episode_uid`, `object_type`, `object_asset` | the episode and its object type, those of its path (the type is the value the diversity item counts), and the object's geometry asset, a nonempty string |
 | `label` | the episode's outcome: `success`, `fracture`, `fail` or `unknown` |
-| `n_frames`, `n_steps` | rows of the frames file and of the trajectory file |
+| `n_frames`, `n_steps` | rows of the frames file and of the trajectory file, at least 1 |
 | `n_tets` | T |
 | `fps`, `recorded_fps` | the published frame rate and the rate the simulator recorded at; `fps` divides `recorded_fps` |
-| `channels`, `cameras` | the ground-truth channels and the cameras the episode carries |
+| `channels`, `cameras` | the ground-truth channels and the cameras the episode carries, each in the order of the Layout (`rgb`, `depth`, `force`, `stress`, `deformation_gradient`, `segmentation`; `front`, `wrist`); `cameras` is empty exactly when no camera channel is listed |
 | `image_size` | per camera of `cameras`: `height`, `width` |
-| `segmentation_classes` | the mask classes in value order, or null without segmentation |
+| `segmentation_classes` | the six mask classes in value order (see Conventions), or null without segmentation |
 | `video` | the encoder settings (see Videos), or null without RGB |
 | `ffmpeg_version` | the first line of `ffmpeg -version` of the build that encoded the videos, or null without RGB |
+| `video_sha256` | per camera of `cameras`, the sha256 of its video in lower-case hex, or null without RGB. It ties each video to its episode by content |
 | `facts` | per-episode values the diversity tables read, nested by kind. `material`, `placement`, `lighting` and `camera` are each a mapping holding at least one value that is not null; other kinds may be added |
-| `task` | what benchmark scoring reads besides the trajectory. Its keys are defined by the PG-T1 scorer (issue #20); until then it is free-form, or null |
-| `header`, `generation_provenance`, `export_provenance` | the generator's episode header and the records of the code and data that generated and exported it, or null |
-| `source_n_frames`, `source_cut_at_row` | the generator's frame count, which `n_steps` equals when the trajectory holds every step the generator recorded, or null when it is unknown; and the row the export stopped at because a frame missed a layer (-1 when it did not stop early) |
+| `task` | what benchmark scoring reads besides the trajectory, a mapping or null. Its keys are defined by the PG-T1 scorer (issue #20); until then it is free-form |
+| `header`, `generation_provenance`, `export_provenance` | the generator's episode header and the records of the code and data that generated and exported it, each a mapping or null |
+| `source_n_frames`, `source_cut_at_row` | the generator's frame count, at least `n_steps`, which `n_steps` equals when the trajectory holds every step the generator recorded, or null when it is unknown; and the row the export stopped at because a frame missed a layer (-1 when it did not stop early) |
 
 Every episode of a dataset must state the same `format`, `format_version`, `dataset_name`,
 `dataset_version`, `license`, `fps`, `recorded_fps`, `channels`, `cameras`, `image_size`,
@@ -222,6 +232,8 @@ its simulation time. RGB is the only lossy channel; every other channel is store
 | Frame size | the camera's `image_size`, whose height and width are even when the dataset has RGB (4:2:0 halves both for colour) |
 | Frame rate | the dataset's `fps`, constant |
 | Frames | the episode's `n_frames` |
+| Timing | every frame shown once, in order: the media duration (`mdhd`) is the frames' total, no composition offset (`ctts`) reorders them, and an edit list, when there is one, holds one entry at media time 0 and rate 1 that lasts as long as the frames |
+| Content | the sha256 its episode's metadata states (`video_sha256`) |
 | Encoder settings | stated in `metadata.yaml` (`video`) |
 
 All of these are read from the file's index, without decoding. The encoder settings are `codec`
@@ -245,7 +257,7 @@ or ignore them.
 | `counts` | `n_frames`, `n_episodes`, `n_files` (the entries of `files`: frames, trajectory and video files, not tool files), `n_object_types`, `n_object_assets`, `n_channels` |
 | `object_types` | per type: `n_episodes`, `n_frames`, `assets` |
 | `files` | per file: `path`, `kind` (`frames`, `trajectory` or `video`), `episode_uid`, `object_type`, `n_frames` for frames files and videos or `n_steps` for trajectories, `sha256`, `bytes` |
-| `tools` | per file under `tools/`: `path`, `sha256`, `bytes` |
+| `tools` | `tools/check_dataset.py` and `tools/check_criteria.yaml`: `path`, `sha256`, `bytes` |
 | `conventions` | units, world frame, quaternion order, frame steps, the trajectory's rows, the video clock, camera model and axes, images, depth, stress, the deformation gradient's reference configuration, and `segmentation_classes` (null without segmentation) |
 | `provenance` | `generation` and `export`: the distinct provenance records the episodes carry |
 
@@ -255,37 +267,36 @@ or ignore them.
 ## Finalizing
 
 `finalize_dataset(root)`, or `GraspDataRecorder.finalize()`, runs once every episode is written.
-It writes `metadata.yaml`, `SHA256SUMS` and `.gitattributes`, and writes none of them when it
-refuses the dataset. It refuses it when:
+It writes `tools/check_dataset.py`, `tools/check_criteria.yaml`, `.gitattributes`,
+`metadata.yaml` and `SHA256SUMS`, in that order, and writes none of them when it refuses the
+dataset. `tools/check_dataset.py` is this package's `check_dataset.py` byte for byte, and
+`tools/check_criteria.yaml` the packaged acceptance values, or the file `criteria=` names.
 
-- the root holds no episode;
-- a file under the root is not part of the layout (an interrupted episode leaves `.part` files),
-  or an episode's file is missing, or a file belongs to no episode;
-- an episode's metadata is not a mapping, is not `physgraspgen-public` 2.0, lacks a key, names
-  another episode or object type than its path, does not describe its columns, or lacks a kind of
-  `facts`;
-- an episode's `object_asset` is not a nonempty string, its `label` is not one the format lists,
-  its `n_frames`, `n_steps`, `n_tets`, `fps` or `recorded_fps` is not a positive integer, its `fps`
-  does not divide its `recorded_fps`, or its `video` and `ffmpeg_version` are not a mapping and a
-  string with `rgb` and both null without it;
-- one episode id is under two object types;
+It reads every file with the check's own rules (see The check), in `workers` threads: every
+Parquet file in full, with every page's checksum verified and every value rule applied, and every
+video's index. Then it hashes each file. It refuses the dataset when:
+
+- the root holds no episode, or a file the layout does not define (an interrupted episode leaves
+  `.part` files), or `tools/` holds a file other than the two tool files;
+- a file breaks a rule of the check: an episode's metadata (its keys, their values, the identity
+  of its path), a file's columns (names, order, types, nullability, field metadata), a value of a
+  frame or of a trajectory step, a video's index or its sha256, a file of an episode that is
+  missing, a file of no episode, one episode id under two object types, or two paths that differ
+  only in case;
 - episodes disagree on a key that every episode must state alike (see Episode metadata);
 - two object types are one after lower-casing and stripping (`apple`, `Apple`), or one
   `object_asset` is under two object types;
-- a Parquet file cannot be read in full: every column of every row group is decoded and every
-  page's checksum verified;
-- a Parquet file's columns differ from the format's (its Arrow schema, with the field metadata
-  that holds each column's shape, the file's own schema metadata aside), its row count differs
-  from its metadata, or a trajectory file's metadata differs from its frames file's;
-- a video differs from the Videos table, read from its index;
+- an episode's `facts` lack a kind the criteria require;
+- a folder holds more than the 10,000 files the Hugging Face Hub allows in one;
+- the criteria file is not one the check can apply;
 - `doi` or `download_url` is not of the form given in the metadata.yaml table.
 
-It reads each Parquet file in full and parses each video's index, then hashes the file, in `workers`
-threads. The `.part` files that a stopped finalize leaves at the root are replaced, not refused, and
-the `.git/` and `.cache/` folders at the root, which a clone of the Hub's repository and
-`hf download --local-dir` create, are skipped. `.gitattributes` marks `metadata.yaml`, `SHA256SUMS`
-and `tools/**` as `-text`, so that a git checkout keeps the bytes that are hashed whatever its
-line-ending settings, and sends `*.parquet` and `*.mp4` through Git LFS, as the Hub stores them.
+The tool files and the `.part` files that a stopped finalize leaves are replaced, not refused,
+and the `.git/` and `.cache/` folders at the root, which a clone of the Hub's repository and
+`hf download --local-dir` create, are skipped. `.gitattributes` marks `metadata.yaml`,
+`SHA256SUMS` and `tools/**` as `-text`, so that a git checkout keeps the bytes that are hashed
+whatever its line-ending settings, and sends `*.parquet` and `*.mp4` through Git LFS, as the Hub
+stores them.
 
 ## Conventions
 
@@ -306,10 +317,108 @@ line-ending settings, and sends `*.parquet` and `*.mp4` through Git LFS, as the 
 
 ## The check
 
-`tools/check_dataset.py` (issue #19) tests a downloaded copy against the four items and needs
-Python 3.10 or newer with NumPy, PyArrow and PyYAML. It counts video frames from the MP4 index, so
-it needs no video decoder. The acceptance values come from `tools/check_criteria.yaml`, and a run
-passes only with the criteria file and the script whose sha256 `metadata.yaml` lists.
+`tools/check_dataset.py` tests a dataset against the four items of the dataset test, with the
+acceptance values of `tools/check_criteria.yaml`. It is this package's
+`openphysgraspgen/dataset/check_dataset.py`, the same file that defines the format for the writer
+and finalize, and it needs only Python 3.10 or newer with NumPy 1.26, PyArrow 17 and PyYAML 6 or
+newer: nothing from this package, and no video decoder.
+
+### Running it
+
+From the dataset's root, the folder that holds `metadata.yaml`:
+
+```
+python -I tools/check_dataset.py . --seed <the tester's seed>
+python -I tools/check_dataset.py . --seed 20261116 --json report.json --workers 8
+```
+
+`-I` keeps the interpreter from importing from the working directory or `PYTHONPATH`, and the
+script drops its own folder from the path, so no file beside it in `tools/` can stand in for a
+module it imports.
+
+| Option | Meaning |
+|---|---|
+| `--seed N` | the tester's seed, which draws the consistency samples; required when that item runs |
+| `--json PATH` | also write the whole report as JSON |
+| `--workers N` | threads that hash and read the files (default: the CPU count, at most 8) |
+| `--only ITEMS` | comma-separated items to run, from `scale,metadata,consistency,diversity` |
+| `--criteria PATH` | other acceptance values; a run passes only with the published file |
+| `--sample N` | frames in each consistency sample; one smaller than the criteria's passes only when it holds every candidate frame |
+| `--no-checksums` | read every file without comparing its sha256; the metadata item cannot pass |
+
+### What it checks
+
+Every file under `data/`, `trajectories/` and `videos/` is hashed before any is opened, and only
+a file whose sha256 is the one `metadata.yaml` states is read: a damaged or partial download is
+reported as such, never read as if it were the published file. A file read is read in full:
+every page of a Parquet file is decoded and its checksum verified, and every rule on this page is
+applied to its footer, its columns and every value of every frame and step. A video is read from
+its MP4 index alone. A file that changes while the check runs is reported. Files of another
+suffix or with a hidden name in the data folders, and files in `tools/` other than the two tool
+files, are ignored and listed in the report.
+
+| Item | Passes when | Published values |
+|---|---|---|
+| scale | no data file breaks a rule, and the frames of the episodes whose files are all clean reach the minimum | `min_frames` 1,000,000 |
+| metadata | nothing `metadata.yaml` states disagrees with the files: counts, object types, channels, conventions, each episode's shared values, each file's kind, size, count, identity and sha256, the tools and `SHA256SUMS`. And the specification holds: the required channels and cameras in every episode, the licence, a DOI and an `https://` download URL | `max_mismatches` 0; the six channels, `front` and `wrist`, `CC-BY-4.0` |
+| consistency | every frame's layers carry the frame's own step and its videos hold it at its index (the step part), and on a sample drawn with the seed from the frames whose contacts press on the robot, those contact points projected through each camera land within a tolerance of the object's mask (the projection) | `min_pass_fraction` 1.0 for both parts, of the layers `rgb`, `depth`, `force`, `stress`; a sample of 1,000 from at least 1,000 such frames; 4 px |
+| diversity | the object types reach the minimum, and no frames file is unread or untyped, no two types are one in lower case, no asset or episode is under two types, and every episode's `facts` hold the required kinds; a table per variable of the facts, the types and the labels is reported | `min_object_types` 10; `material`, `placement`, `lighting`, `camera` |
+
+The samples: a frame's key is the first 8 bytes of the sha256 of `<seed> NUL <purpose> NUL
+<path> NUL <frame>`, and the frames of the smallest keys are the sample, so one seed draws the
+same frames on any machine, whatever order the files are read in. The projection takes each
+sampled frame's contacts that press on the robot (`is_robot`, and a force that is not 0), its
+camera matrices and its masks, read by the class name `object`: a camera passes when its points
+in view lie within `projection_radius_px` of an object pixel, a frame when every camera that sees
+a point passes, and every camera must see a point in some sampled frame. The 4 px tolerance is a
+placeholder until it is measured on format 2.0 data and agreed with the test lab; the criteria
+file states its provenance, and the report repeats it.
+
+A run passes only with the script and the criteria file whose sha256 `metadata.yaml` lists: the
+digests of the running script and of the criteria bytes the run applied are compared, so weaker
+criteria or an edited script fail the run even when every item passes. `metadata.yaml` itself is
+not hashed by the dataset; the report prints its sha256 to compare with the one a DOI record
+publishes. The specification fails until the dataset is published, as finalize writes `doi` and
+`download_url` as null until they are given.
+
+### What it prints
+
+A table, the listings of what failed (the first 50 of each; the JSON report holds them all), the
+diversity tables, and a last line that a program reads:
+
+```
+physgraspgen-public 2.0 dataset check
+root: /data/physgraspgen-dataset
+metadata.yaml: sha256 8ed4b2834fb12ee20394237981321dded26c02b3c05df04276403835cb553879
+criteria: /data/physgraspgen-dataset/tools/check_criteria.yaml (sha256 693e6253e768b0c8; the published one: yes)
+script: /data/physgraspgen-dataset/tools/check_dataset.py (sha256 c66e0e133da35f5b; the published one: yes)
+items run: scale, metadata, consistency (not run: diversity)
+
+Item                  Measured                                                             Criterion                      Result
+scale                 10 frames in 4 episodes (16 files)                                   >= 10 frames                   PASS
+metadata              0 mismatches in 184 comparisons                                      <= 0 mismatches, and spec      FAIL
+  spec (in metadata)  6 of 6 GT channels, cameras front, wrist; failed: doi, download_url  6 channels, front, wrist, ...  FAIL
+consistency           steps 10/10 frames (100.00 %), sample 5/5; projection 5/5 of ...     100 % of frames; ...           PASS
+
+Overall: FAIL for the items run; not run: diversity
+RESULT {"pass": false, "items_run": ["scale", "metadata", "consistency"], "criteria": {...}, ...}
+```
+
+The `RESULT` line holds the verdict, the items run, the criteria's and the script's sha256 and
+whether each is the published one, the sha256 of `metadata.yaml`, and each item's headline
+numbers. Progress lines (`hashing:`, `reading:`, `projecting:`) and warnings go to standard error.
+The JSON report is strict JSON: a value JSON cannot hold, such as a NaN in `metadata.yaml`, is
+written as a string.
+
+| Exit status | Meaning |
+|---|---|
+| 0 | every item run passed, with the published criteria and script |
+| 1 | the run completed and failed: an item failed, the criteria or the script are not the published ones, or `--no-checksums` was given with the metadata item |
+| 2 | the check could not run, or its report could not be written: a usage error, a missing or invalid criteria file or `metadata.yaml`, criteria values an item cannot apply, a dependency or Python too old, an interrupt, or a machine out of memory or file descriptors. The `RESULT` line gives the reason |
+
+Hashing reads every byte once. Reading decodes every column, about 1.6 ms a frame at 480 x 640
+with two cameras and 3,000 tetrahedra on one thread, or half an hour per million frames, which
+`--workers` threads share.
 
 ## Writing and reading
 
@@ -343,7 +452,7 @@ with recorder.episode(
         episode.add_frame(frame)
     for step in steps:  # every recorded step from step 1, for the trajectory file
         episode.add_step(step)
-recorder.finalize()  # once every episode is written
+recorder.finalize()  # once every episode is written: tools/, metadata.yaml, SHA256SUMS
 
 data = read_frames("dataset/data/apple/apple-0001.parquet", columns=["object.centroid"])
 ```
