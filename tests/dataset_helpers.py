@@ -285,3 +285,157 @@ def fake_av1(directory):
     return _fake_ffmpeg(
         directory, f'exec "{sys.executable}" -S "{TESTS / "fake_ffmpeg.py"}" "$@"'
     )
+
+
+# --- datasets for the check -----------------------------------------------------------
+
+# A small image: the object fills rows 3 to 12 and columns 6 to 17, the gripper's pads
+# the first three columns. Both cameras look along +z from near the origin, so a point
+# at z = 1 m with |x|, |y| <= 0.1 m lands on the object.
+SIZE = (16, 24)
+OBJECT_ROWS, OBJECT_COLS = slice(3, 13), slice(6, 18)
+DOI = "10.5281/zenodo.1234567"
+URL = "https://huggingface.co/datasets/org/unit-test"
+# Types, episode ids and frame counts of the dataset the check tests build.
+EPISODES = (
+    ("apple", "ep-0", 3),
+    ("apple", "ep-1", 2),
+    ("banana", "ep-2", 3),
+    ("cherry", "ep-3", 2),
+)
+N_FRAMES = sum(n for _, _, n in EPISODES)
+
+
+def scene_spec(channels=fmt.CHANNELS, cameras=fmt.CAMERAS, **kwargs):
+    return DatasetSpec(
+        name="unit-test",
+        version="0.0.1",
+        fps=30,
+        recorded_fps=60,
+        image_size=dict.fromkeys(cameras, SIZE),
+        channels=channels,
+        frames_per_row_group=2,
+        **kwargs,
+    )
+
+
+def scene_intrinsics(camera):
+    f = 20.0 if camera == "front" else 18.0
+    return np.array(
+        [[f, 0.0, (SIZE[1] - 1) / 2], [0.0, f, (SIZE[0] - 1) / 2], [0, 0, 1]]
+    )
+
+
+def scene_world_to_camera(camera):
+    matrix = np.eye(4)
+    matrix[0, 3] = 0.0 if camera == "front" else 0.01
+    return matrix
+
+
+def scene_mask():
+    mask = np.zeros(SIZE, dtype=np.uint8)
+    mask[OBJECT_ROWS, OBJECT_COLS] = 1
+    mask[:, :3] = 3
+    return mask
+
+
+def scene_contacts(step, offset=0.0, pressed=True):
+    """Two contacts that press on the robot, then one on the ground; offset moves the
+    robot's contacts along x, in metres at 1 m."""
+    x = np.array([0.05, -0.05, 0.0]) + np.array([offset, offset, 0.0])
+    points = np.stack([x, [0.02, -0.03, 0.2], [1.0, 1.0, 1.0]], axis=1)
+    force = np.array([[0.0, 0.0, 2.0 + step], [0.0, 1.0, 0.0], [0.0, 0.0, 9.8]])
+    if not pressed:
+        force[:2] = 0.0
+    return {
+        "force.contact_force": force,
+        "force.contact_point_world": points,
+        "force.contact_particle": np.array([3, 7, 11]),
+        "force.contact_is_ground": np.array([False, False, True]),
+        "force.contact_is_robot": np.array([True, True, False]),
+    }
+
+
+def scene_frame(step, spec, n_contacts=None, offset=0.0, pressed=True):
+    """A frame of the scene: its pressed contacts land on the object in both cameras."""
+    frame = make_frame(step, spec)
+    for camera in spec.cameras:
+        if "rgb" in spec.channels:
+            frame[f"rgb.{camera}.image"] = np.broadcast_to(
+                colour(step, camera), (*SIZE, 3)
+            ).copy()
+        if "depth" in spec.channels:
+            depth = np.full(SIZE, 2.0, dtype=np.float32)
+            depth[OBJECT_ROWS, OBJECT_COLS] = 1.0
+            frame[f"depth.{camera}.depth_m"] = depth
+        if "segmentation" in spec.channels:
+            frame[f"segmentation.{camera}.mask"] = scene_mask()
+        frame[f"camera.{camera}.intrinsics"] = scene_intrinsics(camera)
+        frame[f"camera.{camera}.world_to_camera"] = scene_world_to_camera(camera)
+    if "force" in spec.channels:
+        frame.update(scene_contacts(step, offset, pressed))
+    frame["object.n_soft_contacts"] = 3
+    return frame
+
+
+def scene_facts(object_type, uid):
+    i = int(uid.rsplit("-", 1)[1])
+    return {
+        "material": {"E_pa": 1.0e4 * 10**i, "model": "yeoh" if i % 2 else "ogden"},
+        "placement": {"yaw_deg": 15.0 * i, "offset_m": [0.01 * i, 0.0]},
+        "lighting": {"elevation_deg": 30.0 + i},
+        "camera": {"front_distance_m": 0.6, "rig": object_type},
+    }
+
+
+def criteria_text(**values):
+    """The packaged criteria, with values in place of the published ones."""
+    text = Path(fmt.__file__).with_name("check_criteria.yaml").read_text()
+    for key, value in values.items():
+        lines = text.split("\n")
+        (i,) = [n for n, line in enumerate(lines) if line.strip().startswith(f"{key}:")]
+        indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
+        lines[i] = f"{indent}{key}: {value}"
+        text = "\n".join(lines)
+    return text
+
+
+# Values a dataset of EPISODES meets; the others are the published ones.
+SMALL = {
+    "min_frames": N_FRAMES,
+    "sample_frames": 5,
+    "min_contact_frames": 4,
+    "min_object_types": 3,
+}
+
+
+def build_dataset(
+    root,
+    *,
+    ffmpeg=None,
+    episodes=EPISODES,
+    channels=fmt.CHANNELS,
+    cameras=fmt.CAMERAS,
+    criteria=None,
+    doi=DOI,
+    download_url=URL,
+    frame=scene_frame,
+):
+    """A dataset written by GraspDataRecorder and finalized with small criteria."""
+    from openphysgraspgen.dataset import GraspDataRecorder
+
+    spec = scene_spec(channels, cameras)
+    recorder = GraspDataRecorder(root, spec, ffmpeg=ffmpeg or "ffmpeg")
+    for object_type, uid, n in episodes:
+        write_episode(
+            recorder,
+            uid=uid,
+            object_type=object_type,
+            n_frames=n,
+            frame=frame,
+            facts=scene_facts(object_type, uid),
+            source_n_frames=2 * n,
+        )
+    path = Path(root).parent / f"{Path(root).name}-criteria.yaml"
+    path.write_text(criteria if criteria is not None else criteria_text(**SMALL))
+    return recorder.finalize(doi=doi, download_url=download_url, criteria=path)
