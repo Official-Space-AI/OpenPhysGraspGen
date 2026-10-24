@@ -904,6 +904,51 @@ def test_a_writer_whose_episode_was_taken_over_leaves_it_alone(tmp_path):
     ]
 
 
+class PlaceholderIds:
+    """The os module, but an empty file has one placeholder id, as FAT32 and exFAT
+    report it on macOS until the file holds data."""
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+    @staticmethod
+    def _id(result):
+        if result.st_size:
+            return result
+        fields = list(result)
+        fields[1] = 2**64 - 8
+        return os.stat_result(fields)
+
+    def stat(self, path):
+        return self._id(os.stat(path))
+
+    def fstat(self, fd):
+        return self._id(os.fstat(fd))
+
+
+def test_a_claim_is_its_open_file_not_the_id_it_was_created_with(tmp_path, monkeypatch):
+    monkeypatch.setattr(writer_module, "os", PlaceholderIds())
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    # One frame: the claim stays empty until close() writes it.
+    write_episode(recorder, uid="ep-0", n_frames=1)
+    old = open_episode(recorder, "ep-1", label="fail")
+    new = open_episode(recorder, "ep-1", overwrite=True)
+    fill(old, 1)
+    with pytest.raises(RuntimeError, match="another writer took episode ep-1 over"):
+        old.close()
+    fill(new, 1)
+    new.close()
+    assert files_under(tmp_path) == [
+        "data/apple/ep-0.parquet",
+        "data/apple/ep-1.parquet",
+        "trajectories/apple/ep-0.parquet",
+        "trajectories/apple/ep-1.parquet",
+    ]
+    assert (
+        episode_metadata(recorder.files("apple", "ep-1").frames)["label"] == "success"
+    )
+
+
 @pytest.mark.parametrize("renaming", ["trajectories", "data"])
 def test_a_writer_taken_over_while_renaming_publishes_no_file_of_the_other(
     tmp_path, monkeypatch, renaming

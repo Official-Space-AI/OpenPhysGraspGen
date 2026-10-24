@@ -128,14 +128,6 @@ def _part(path: Path) -> Path:
     return path.with_name(path.name + ".part")
 
 
-def _file_id(path: Path) -> tuple[int, int] | None:
-    try:
-        stat = os.stat(path)
-    except FileNotFoundError:
-        return None
-    return stat.st_dev, stat.st_ino
-
-
 def _leaves(schema: pa.Schema) -> list[tuple[str, str]]:
     """The Parquet leaf columns of a schema: (path, physical type)."""
     sink = pa.BufferOutputStream()
@@ -352,8 +344,8 @@ class EpisodeWriter:
         self._encoders: dict[str, VideoEncoder] = {}
         self._done = False
         self._claim = _claim(self.files, info["episode_uid"], overwrite)
-        stat = os.fstat(self._claim.fileno())
-        self._claim_id = (stat.st_dev, stat.st_ino)
+        # The claim's file id once it is closed, which only Windows does before publishing.
+        self._claim_id: tuple[int, int] | None = None
 
     def __enter__(self) -> Self:
         return self
@@ -373,10 +365,18 @@ class EpisodeWriter:
     def _owns_claim(self, path: Path | None = None) -> bool:
         """Whether path, the frames .part file by default, is this writer's claim.
 
-        On POSIX the claim stays open until this is no longer asked, so that its file
-        id cannot be given to another file.
+        The open claim is compared with the file at path, not with an id taken when it
+        was created: FAT32 and exFAT give an empty file a placeholder id that changes
+        once the file holds data. On POSIX the claim stays open until this is no longer
+        asked, so that its file id cannot be given to another file.
         """
-        return _file_id(path or _part(self.files.frames)) == self._claim_id
+        try:
+            found = os.stat(path or _part(self.files.frames))
+        except FileNotFoundError:
+            return False
+        if self._claim.closed:
+            return (found.st_dev, found.st_ino) == self._claim_id
+        return os.path.samestat(os.fstat(self._claim.fileno()), found)
 
     def _check_claim(self, path: Path | None = None) -> None:
         if not self._owns_claim(path):
@@ -632,7 +632,6 @@ class EpisodeWriter:
                 raise ValueError(
                     f"the trajectory lacks frame steps, first {unrecorded[0]}"
                 )
-            self._check_claim()
             self._flush()
             metadata = self._metadata()
             assert self._writer is not None
@@ -640,8 +639,12 @@ class EpisodeWriter:
             self._writer.close()
             self._writer = None
             self._claim.flush()
+            # Checked once the claim holds data, which gives it its own id on FAT32.
+            self._check_claim()
             if os.name == "nt":
                 # Windows renames no open file, and does not soon reuse a file id.
+                stat = os.fstat(self._claim.fileno())
+                self._claim_id = (stat.st_dev, stat.st_ino)
                 self._claim.close()
             _check_encodings(_part(self.files.frames), self._options)
             trajectory = pa.Table.from_pylist(
