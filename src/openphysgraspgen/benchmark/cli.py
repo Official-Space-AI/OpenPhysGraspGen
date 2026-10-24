@@ -10,7 +10,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-EXIT_OK, EXIT_NOT_OK, EXIT_UNREADABLE = 0, 1, 2
+EXIT_OK, EXIT_NOT_OK, EXIT_FAILED = 0, 1, 2
 
 
 def episodes_path(report: Path) -> Path:
@@ -34,7 +34,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "the report as JSON, with one record per episode beside it as JSON lines. "
         "Exits 0 when every listed episode was scored and no check failed, 1 when an "
         "episode was refused or unlisted or a check failed, 2 when the dataset cannot "
-        "be read.",
+        "be read or the report cannot be written.",
     )
     t1.add_argument(
         "dataset", type=Path, help="the dataset's root, which holds metadata.yaml"
@@ -44,8 +44,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         default=Path("pg-t1.json"),
         metavar="PATH",
-        help="where to write the report (default: pg-t1.json); the episodes go to "
-        "PATH with .episodes.jsonl in place of its suffix",
+        help="where to write the report (default: pg-t1.json), creating its directory; "
+        "the episodes go to PATH with .episodes.jsonl in place of its suffix",
     )
     args = parser.parse_args(argv)
     try:
@@ -60,12 +60,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             'pip install "openphysgraspgen[dataset]"',
             file=sys.stderr,
         )
-        return EXIT_UNREADABLE
+        return EXIT_FAILED
     except DatasetUnreadable as exc:
         print(f"openphysgraspgen benchmark: {exc}", file=sys.stderr)
-        return EXIT_UNREADABLE
+        return EXIT_FAILED
+    sys.stdout.write(report_text(report))
     lines = episodes_path(args.json)
     try:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(
             json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8"
         )
@@ -78,7 +80,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"openphysgraspgen benchmark: cannot write the report: {exc}",
             file=sys.stderr,
         )
-        return EXIT_UNREADABLE
-    sys.stdout.write(report_text(report))
+        return EXIT_FAILED
     print(f"report        {args.json}\nepisodes      {lines}")
     return EXIT_OK if report["status"] == "ok" else EXIT_NOT_OK

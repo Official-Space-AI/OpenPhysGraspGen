@@ -242,8 +242,8 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
     found = (metadata.get("format"), metadata.get("format_version"))
     if found != (FORMAT, FORMAT_VERSION):
         raise DatasetUnreadable(
-            f"{root}: the dataset is {found[0]} {found[1]}; the scorer reads "
-            f"{FORMAT} {FORMAT_VERSION}"
+            f"{root}: the dataset is {found[0]!r} {found[1]!r}; the scorer reads "
+            f"{FORMAT!r} {FORMAT_VERSION!r}"
         )
     entries = _listed(root, metadata)
     records: list[dict[str, Any]] = []

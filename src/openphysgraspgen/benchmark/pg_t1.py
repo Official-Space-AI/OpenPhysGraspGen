@@ -626,8 +626,8 @@ def read_episode(
     if meta.get("format") != FORMAT or meta.get("format_version") != FORMAT_VERSION:
         raise Refused(
             "format",
-            f"the episode is {meta.get('format')} {meta.get('format_version')}, "
-            f"not {FORMAT} {FORMAT_VERSION}",
+            f"the episode is {meta.get('format')!r} {meta.get('format_version')!r}, "
+            f"not {FORMAT!r} {FORMAT_VERSION!r}",
         )
     if listing is not None and (
         meta.get("episode_uid") != listing.get("episode_uid")
@@ -635,9 +635,9 @@ def read_episode(
     ):
         raise Refused(
             "listing",
-            f"the file holds episode {meta.get('episode_uid')} of "
-            f"{meta.get('object_type')}, metadata.yaml lists "
-            f"{listing.get('episode_uid')} of {listing.get('object_type')}",
+            f"the file holds episode {meta.get('episode_uid')!r} of "
+            f"{meta.get('object_type')!r}, metadata.yaml lists "
+            f"{listing.get('episode_uid')!r} of {listing.get('object_type')!r}",
         )
     label = meta.get("label")
     if not (isinstance(label, str) and label in LABELS):
@@ -659,14 +659,14 @@ def read_episode(
     if meta.get("n_steps") != n or (listing is not None and listed != n):
         raise Refused(
             "n_steps",
-            f"the trajectory has {n} rows, its metadata says {meta.get('n_steps')}"
-            + ("" if listing is None else f" and metadata.yaml {listed}"),
+            f"the trajectory has {n} rows, its metadata says {meta.get('n_steps')!r}"
+            + ("" if listing is None else f" and metadata.yaml {listed!r}"),
         )
     if meta.get("source_n_frames") != n:
         raise Refused(
             "trajectory_cut",
             f"the trajectory has {n} rows, the generator recorded "
-            f"{meta.get('source_n_frames')}",
+            f"{meta.get('source_n_frames')!r}",
         )
     problems = task_block_problems(meta.get("task"), fps)
     if problems:

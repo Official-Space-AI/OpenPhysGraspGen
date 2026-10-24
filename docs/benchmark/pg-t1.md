@@ -31,7 +31,9 @@ the `--json` path (default `pg-t1.json`) and one record per episode beside it as
 `python -m openphysgraspgen benchmark pg-t1 ...` does the same. It exits with 0 when every listed
 episode was scored and no check failed, 1 when an episode was refused or a trajectory file is not
 listed or a check failed (the report is written in every case), and 2 when the dataset cannot be
-read. The reference pipeline still runs as `openphysgraspgen` without a subcommand.
+read or the report cannot be written. The table is printed before the report is written, and the
+directory of the `--json` path is created when it does not exist. The reference pipeline still runs
+as `openphysgraspgen` without a subcommand.
 
 From Python:
 

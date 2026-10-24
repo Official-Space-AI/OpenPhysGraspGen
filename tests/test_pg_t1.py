@@ -1258,6 +1258,7 @@ def test_a_carry_task_without_its_mat_is_refused():
     ("change", "word"),
     [
         ({"format_version": "1.0"}, "format"),
+        ({"format_version": 2.0}, "format"),
         ({"label": "lost"}, "label"),
         ({"label": ["success"]}, "label"),
         ({"recorded_fps": True}, "recorded_fps"),
@@ -1273,6 +1274,15 @@ def test_an_episode_that_breaks_an_acceptance_rule_is_refused(change, word):
             columns(rows), {**metadata(rows, block("lift_hold", LH)), **change}
         )
     assert refused.value.word == word
+
+
+def test_a_refusal_shows_the_values_it_found():
+    rows = ramp("lift_hold", LH, 0.15)
+    with pytest.raises(Refused) as refused:
+        score(rows, block("lift_hold", LH), format_version=2.0)
+    assert refused.value.detail == (
+        "the episode is 'physgraspgen-public' 2.0, not 'physgraspgen-public' '2.0'"
+    )
 
 
 def test_a_trajectory_that_does_not_start_at_step_1_is_refused():
@@ -1732,16 +1742,51 @@ def run(*argv):
 def test_the_command_prints_the_table_and_writes_the_report(
     small_dataset, tmp_path, capsys
 ):
-    out = tmp_path / "report.json"
+    out = tmp_path / "reports" / "report.json"
     assert run("pg-t1", small_dataset, "--json", out) == 0
-    printed = capsys.readouterr().out
-    assert "search_lift_hold_carry_place: 1 episode, 1 object type" in printed
-    assert "task score" in printed and "status        ok" in printed
+    text = capsys.readouterr().out
+    assert "search_lift_hold_carry_place: 1 episode, 1 object type" in text
+    assert "task score" in text and "status        ok" in text
     report = json.loads(out.read_text())
     assert report["status"] == "ok"
-    lines = (tmp_path / "report.episodes.jsonl").read_text().splitlines()
+    lines = (out.parent / "report.episodes.jsonl").read_text().splitlines()
     assert [json.loads(line)["episode_uid"] for line in lines] == ["ep-0", "ep-1"]
     assert report == score_dataset(small_dataset)[0]
+
+
+def test_the_table_is_printed_when_the_report_cannot_be_written(
+    small_dataset, tmp_path, capsys
+):
+    blocked = tmp_path / "file"
+    blocked.write_text("")
+    assert run("pg-t1", small_dataset, "--json", blocked / "report.json") == 2
+    out, err = capsys.readouterr()
+    assert "status        ok" in out
+    assert "cannot write the report" in err
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (
+            "format: physgraspgen-public\nformat_version: '1.0'\n",
+            (
+                "the dataset is 'physgraspgen-public' '1.0'; the scorer reads "
+                "'physgraspgen-public' '2.0'"
+            ),
+        ),
+        (
+            "format: physgraspgen-public\nformat_version: 2.0\n",
+            "the dataset is 'physgraspgen-public' 2.0; the scorer reads",
+        ),
+        ("- physgraspgen-public\n", "metadata.yaml is not a mapping"),
+    ],
+)
+def test_a_dataset_of_another_format_cannot_be_scored(text, message, tmp_path, capsys):
+    (tmp_path / "metadata.yaml").write_text(text)
+    assert run("pg-t1", tmp_path, "--json", tmp_path / "r.json") == 2
+    assert message in capsys.readouterr().err
+    assert not (tmp_path / "r.json").exists()
 
 
 def test_the_command_exits_by_the_status(tmp_path, capsys):
