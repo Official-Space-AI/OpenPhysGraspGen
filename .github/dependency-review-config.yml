@@ -1,0 +1,33 @@
+# Pull request rules taken from the license classification and the
+# vulnerability rules of the open source policy. Change this file by pull
+# request; the open source lead approves the change.
+
+license-check: true
+vulnerability-check: true
+fail-on-severity: high
+fail-on-scopes:
+  - runtime
+  - development
+show-openssf-scorecard: true
+
+# The policy's "allowed" class. Conditional licenses are left out on purpose:
+# a package under one passes only after its evaluation is approved and its
+# purl is listed in allow-dependencies-licenses below.
+allow-licenses:
+  - 0BSD
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - CC0-1.0
+  - ISC
+  - MIT
+  - MIT-CMU
+  - PSF-2.0
+  - Python-2.0
+  - Unlicense
+  - Zlib
+
+# Packages approved under a conditional license, one purl each, with the date
+# of the approved evaluation. None yet.
+# allow-dependencies-licenses:
+#   - pkg:pypi/example # approved YYYY-MM-DD
