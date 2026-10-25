@@ -74,6 +74,17 @@ It prints a JSON summary with the calibrated and transferred parameters, the num
 of training and fracture samples, the estimate, and whether the confidence gate
 allowed it.
 
+Score the PG-T1 benchmark from a dataset in the [public format](docs/dataset/format.md),
+with the `dataset` extra installed (`pip install "openphysgraspgen[dataset]"`):
+
+```bash
+openphysgraspgen benchmark pg-t1 path/to/dataset --json pg-t1.json
+```
+
+It prints one table per task and writes the report to `pg-t1.json`, with one record
+per episode in `pg-t1.episodes.jsonl` beside it. The scoring rules are in
+[docs/benchmark/pg-t1.md](docs/benchmark/pg-t1.md).
+
 Evaluate a constitutive law directly:
 
 ```python
