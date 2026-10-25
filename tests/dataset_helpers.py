@@ -3,6 +3,7 @@
 """Builders of episodes, datasets and MP4 indexes that the dataset tests share."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -68,7 +69,12 @@ def _has_av1():
     return "libsvtav1" in encoders
 
 
-needs_av1 = pytest.mark.skipif(not _has_av1(), reason="needs ffmpeg with libsvtav1")
+# With REQUIRE_AV1=1, as CI sets it, these tests run, and fail where ffmpeg lacks
+# libsvtav1 instead of skipping.
+needs_av1 = pytest.mark.skipif(
+    os.environ.get("REQUIRE_AV1") != "1" and not _has_av1(),
+    reason="needs ffmpeg with libsvtav1",
+)
 
 
 def make_spec(channels=NO_RGB, frames_per_row_group=2, version="0.0.1", **kwargs):
