@@ -72,7 +72,7 @@ vulnerability, or before a release when the digest is old, update the digest:
    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.54.0 \
      scan docker:openphysgraspgen:check --platform linux/amd64 -o spdx-json > image.spdx.json
    docker run --rm --platform linux/amd64 --entrypoint sh openphysgraspgen:check \
-     -c 'ls -d /usr/local/lib/python3*/site-packages/numpy.libs/*' > numpy-libs.txt
+     -c 'ls -d /usr/local/lib/python3*/site-packages/numpy.libs/* 2>/dev/null || true' > numpy-libs.txt
    python3 .github/scripts/complete_image_sbom.py image.spdx.json numpy-libs.txt
    docker run --rm --platform linux/amd64 --entrypoint cat openphysgraspgen:check \
      /usr/share/doc/openphysgraspgen/NOTICE.container

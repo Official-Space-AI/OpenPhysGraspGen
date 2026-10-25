@@ -129,7 +129,7 @@ jobs:
       - name: Complete the image SBOM
         run: |
           docker run --rm --entrypoint sh "$IMAGE:$TAG" \
-            -c 'ls -d /usr/local/lib/python3*/site-packages/numpy.libs/*' > "$RUNNER_TEMP/numpy-libs.txt"
+            -c 'ls -d /usr/local/lib/python3*/site-packages/numpy.libs/* 2>/dev/null || true' > "$RUNNER_TEMP/numpy-libs.txt"
           python3 .github/scripts/complete_image_sbom.py \
             "sbom/openphysgraspgen-image-$GITHUB_REF_NAME.spdx.json" "$RUNNER_TEMP/numpy-libs.txt"
       # Fails on a known vulnerability of severity high or above that has a fix, which means
