@@ -30,10 +30,10 @@ SpaceAI PhysGraspGen 프로젝트의 공개 부분이며, 순수 Python·NumPy�
 
 ## 설치
 
-Python 3.10 이상이 필요합니다. 패키지 이름은 `physgraspgen`이고, `1.0.0rc1`부터 PyPI에 올라갑니다.
+Python 3.10 이상이 필요합니다. 패키지 이름은 `openphysgraspgen`이고, `1.0.0rc1`부터 PyPI에 올라갑니다.
 
 ```bash
-pip install physgraspgen
+pip install openphysgraspgen
 ```
 
 그 전까지는 GitHub에서 설치합니다.
@@ -48,7 +48,7 @@ pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
 실행합니다.
 
 ```bash
-physgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
+openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 ```
 
 구성방정식을 직접 계산하는 예시와 Newton 접촉 라벨 기록 예시는
@@ -61,7 +61,7 @@ physgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 | 릴리스 | 목표 시점 | 내용 |
 |---|---|---|
 | 베타 `0.1.0b0` | 2026년 8월 | 구성방정식, 접촉 센서, 보정·전이 파이프라인 (2026-08-25 공개) |
-| `1.0.0rc1` | 2026년 10월 | 파지 데이터 recorder, PyPI 패키지, Hugging Face 공개 데이터셋, Docker 이미지, 모든 릴리스에 CI·SBOM |
+| `1.0.0rc1` | 2026년 10월 | 파지 데이터 recorder, PyPI 패키지, Hugging Face 공개 데이터셋(100만 프레임)과 검사 스크립트, 데이터셋으로 하는 PG-T1 벤치마크 재현, Docker 이미지, 모든 릴리스의 CI와 SBOM |
 | `1.0.0` | 2026년 11월 | 벤치마크, 튜토리얼, 라이선스 검증 |
 
 ## 공개 범위
@@ -70,7 +70,7 @@ physgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 |---|---|---|
 | 라이브러리 (이 저장소) | GitHub | Apache-2.0 |
 | 파지 데이터셋 | Hugging Face Hub (`1.0.0rc1`부터) | CC-BY-4.0 |
-| 벤치마크·재현 스크립트 | 이 저장소 (`1.0.0`부터) | Apache-2.0 |
+| 벤치마크와 재현 스크립트 | 이 저장소 (PG-T1은 `1.0.0rc1`, 나머지는 `1.0.0`) | Apache-2.0 |
 | 고정밀 솔버 코어 | 비공개 | 상용 |
 
 ## 개발 방식
