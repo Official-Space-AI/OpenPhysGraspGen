@@ -2013,6 +2013,7 @@ def test_labels_kept_in_another_order_are_one_population(tmp_path):
         "fracture",
     ]
     assert "population episodes kept under different rules" not in printed(report)
+    assert "kept: labels success, fracture;" in report_text(report)
 
 
 def test_scores_are_pooled_over_object_types_and_given_per_type(tmp_path):

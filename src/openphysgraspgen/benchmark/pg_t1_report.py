@@ -405,7 +405,7 @@ def _population(population: Mapping[str, Any], task: Task) -> str:
         return "every episode the generation run made"
     kept = "the episodes the generation run kept"
     if labels is not None:
-        kept += f": labels {', '.join(sorted(labels))}"
+        kept += f": labels {', '.join(labels)}"
     if lift:
         rise = "lifted or rose 5 cm" if task.criterion_id == C_ID else "lifted"
         kept += (
