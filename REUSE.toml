@@ -1,0 +1,37 @@
+version = 1
+
+# Files the project writes itself and that cannot carry a comment header.
+# Some names are listed before the files exist so that the planned community
+# and release documents pass `reuse lint` when they are added. A text copied
+# from elsewhere, such as the Contributor Covenant (CC-BY-4.0), needs its own
+# annotation instead of this one.
+[[annotations]]
+path = [
+    ".github/**",
+    ".gitignore",
+    "CHANGELOG.md",
+    "COMMUNITY.md",
+    "CONTRIBUTING.md",
+    "GOVERNANCE.md",
+    "NOTICE",
+    "README.ko.md",
+    "README.md",
+    "RELEASING.md",
+    "REUSE.toml",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "docs/**",
+    "pyproject.toml",
+]
+SPDX-FileCopyrightText = "Copyright (c) 2026 SpaceAI"
+SPDX-License-Identifier = "Apache-2.0"
+
+# The Code of Conduct is the Contributor Covenant 2.0, which is licensed under
+# CC-BY-4.0; the project only filled in its contact details.
+[[annotations]]
+path = "CODE_OF_CONDUCT.md"
+SPDX-FileCopyrightText = [
+    "2014 Coraline Ada Ehmke",
+    "Copyright (c) 2026 SpaceAI",
+]
+SPDX-License-Identifier = "CC-BY-4.0"
