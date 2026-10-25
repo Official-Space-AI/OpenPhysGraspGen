@@ -1511,6 +1511,32 @@ def test_each_placement_tolerance_is_inclusive(rows, task, key, edge, word):
         assert (placed["verdict"], placed["reasons"]) == (verdict, reasons)
 
 
+def test_a_carried_row_counts_as_dragged_only_under_the_drop_tolerance():
+    # The tool drags the object over rows 500 to 599 with its lowest point h over its
+    # rest height. Only the carry is read: the object then falls h after the opening,
+    # which the same key bounds.
+    rows = put_down(path=dragged(0.003))
+    h = rows[550]["object.bbox_min"][2] - rows[0]["object.bbox_min"][2]
+    for tolerance, reasons in ((h, []), (math.nextafter(h, 1.0), ["dragged"])):
+        task = block(CARRY, CP, judge={"place_release_drop_tol_m": tolerance})
+        facts = score(rows, task)["placed_task"]["facts"]
+        assert facts["carried_fail_reasons"] == reasons
+
+
+def test_the_put_back_counts_a_rise_of_exactly_lift_success_m():
+    # The object reaches its full rise at row 119 and keeps it to the end of the hold, at
+    # row 359.
+    rows = put_back()
+    rise = centroid_at(rows, 119)[2] - centroid_at(rows, 0)[2]
+    for threshold, outcome in (
+        (rise, (True, None)),
+        (math.nextafter(rise, 1.0), (None, "internal_lift_not_met")),
+    ):
+        task = block("lift_hold_place", LHP, judge={"lift_success_m": threshold})
+        placed = score(rows, task)["placed_task"]
+        assert (placed["verdict"], placed["why"]) == outcome
+
+
 def test_a_hold_the_recording_cuts_short_leaves_the_put_down_unjudged():
     # No drop stop: the internal hold from the crossing at row 259 needs rows to 499.
     record = score(put_down(truncate=400), block(CARRY, CP))
