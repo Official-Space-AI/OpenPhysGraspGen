@@ -61,7 +61,7 @@ openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 | 릴리스 | 목표 시점 | 내용 |
 |---|---|---|
 | 베타 `0.1.0b0` | 2026년 8월 | 구성방정식, 접촉 센서, 보정·전이 파이프라인 (2026-08-25 공개) |
-| `1.0.0rc1` | 2026년 10월 | 파지 데이터 recorder, PyPI 패키지, Hugging Face 공개 데이터셋, Docker 이미지, 모든 릴리스에 CI·SBOM |
+| `1.0.0rc1` | 2026년 10월 | 파지 데이터 recorder, PyPI 패키지, Hugging Face 공개 데이터셋(100만 프레임)과 검사 스크립트, 데이터셋으로 하는 PG-T1 벤치마크 재현, Docker 이미지, 모든 릴리스의 CI와 SBOM |
 | `1.0.0` | 2026년 11월 | 벤치마크, 튜토리얼, 라이선스 검증 |
 
 ## 공개 범위
@@ -70,7 +70,7 @@ openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 |---|---|---|
 | 라이브러리 (이 저장소) | GitHub | Apache-2.0 |
 | 파지 데이터셋 | Hugging Face Hub (`1.0.0rc1`부터) | CC-BY-4.0 |
-| 벤치마크·재현 스크립트 | 이 저장소 (`1.0.0`부터) | Apache-2.0 |
+| 벤치마크와 재현 스크립트 | 이 저장소 (PG-T1은 `1.0.0rc1`, 나머지는 `1.0.0`) | Apache-2.0 |
 | 고정밀 솔버 코어 | 비공개 | 상용 |
 
 ## 개발 방식
@@ -81,10 +81,16 @@ PhysGraspGen의 일상 개발은 고객별 코드가 함께 있는 비공개 저
 공개적으로 계획하고 리뷰합니다. 모든 변경은 이슈에서 시작해 리뷰를 거친 pull
 request로 들어오고, 릴리스는 릴리스 노트와 SBOM을 붙여 배포합니다.
 
-## 의견 보내기
+## 커뮤니티와 지원
 
-버그 신고와 질문은 [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)에
-남겨 주세요. 한국어로 써도 됩니다. 기여 가이드, 행동 강령, 보안 정책은 추가하는 중입니다.
+- 질문·아이디어: [GitHub Discussions](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions)
+- 버그: [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)
+- 어디에 무엇을 물어야 하는지, 응답 시간: [COMMUNITY.md](COMMUNITY.md)
+- 보안 취약점: [SECURITY.md](SECURITY.md) (공개 이슈로 올리지 마세요)
+
+기여는 [CONTRIBUTING.md](CONTRIBUTING.md)부터 읽어 주세요. 참여하는 모든 사람은
+[행동 강령](CODE_OF_CONDUCT.md)을 따릅니다. 역할과 결정 방식, 릴리스 승인 절차는
+[GOVERNANCE.md](GOVERNANCE.md)에 있습니다. 질문과 이슈는 한국어로 써도 됩니다.
 
 ## 라이선스
 

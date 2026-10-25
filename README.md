@@ -109,7 +109,7 @@ Releases follow the plan of the funded project.
 | Release | Target | Contents |
 |---|---|---|
 | Beta `0.1.0b0` | Aug 2026 | Constitutive laws, contact sensor, calibration/transfer pipeline (published 2026-08-25) |
-| `1.0.0rc1` | Oct 2026 | Grasp data recorder, PyPI package, public dataset on Hugging Face, Docker image, CI and SBOM on every release |
+| `1.0.0rc1` | Oct 2026 | Grasp data recorder, PyPI package, public dataset on Hugging Face (1,000,000 frames) with its check script, PG-T1 benchmark reproduction from the dataset, Docker image, CI and SBOM on every release |
 | `1.0.0` | Nov 2026 | Benchmarks, tutorials, license verification |
 
 ## Scope of the open release
@@ -120,7 +120,7 @@ PhysGraspGen is developed as open core.
 |---|---|---|
 | Library (this repository) | GitHub | Apache-2.0 |
 | Grasp dataset | Hugging Face Hub (with `1.0.0rc1`) | CC-BY-4.0 |
-| Benchmarks and reproduction scripts | This repository (with `1.0.0`) | Apache-2.0 |
+| Benchmarks and reproduction scripts | This repository (PG-T1 with `1.0.0rc1`, the rest with `1.0.0`) | Apache-2.0 |
 | High-precision solver core | Not published | Commercial |
 
 ## How development works
@@ -132,11 +132,17 @@ the project's. From now on, work on the open library is planned and reviewed her
 in public: every change starts as an issue and lands through a reviewed pull
 request, and releases ship with release notes and an SBOM.
 
-## Feedback
+## Community and support
 
-Bug reports and questions are welcome as
-[GitHub issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues).
-Contribution guidelines, a code of conduct and a security policy are being added.
+- Questions and ideas: [GitHub Discussions](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions)
+- Bugs: [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)
+- Where to ask what, and response times: [COMMUNITY.md](COMMUNITY.md)
+- Security vulnerabilities: [SECURITY.md](SECURITY.md) (please do not open a public issue)
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[`good first issue`](https://github.com/Official-Space-AI/OpenPhysGraspGen/labels/good%20first%20issue)
+label. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Who
+decides what, and how releases are approved, is in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## License
 
