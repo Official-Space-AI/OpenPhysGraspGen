@@ -476,7 +476,8 @@ which may be given but must equal the frame's `sim_step`); `source_frame_index` 
 an episode's `source_n_frames`, which is None only when the generator's frame count is unknown. RGB
 is given as `rgb.<camera>.image`, (H, W, 3) uint8, the contacts as `force.contact_force`,
 `force.contact_point_world`, `force.contact_particle`, `force.contact_is_ground` and
-`force.contact_is_robot`, one row per contact, and the camera matrices as 3 x 3 and 4 x 4 arrays. A
+`force.contact_is_robot`, one row per contact (without contacts, any array without rows, such as
+`np.array([])`), and the camera matrices as 3 x 3 and 4 x 4 arrays. A
 step gives every column of the trajectory file except `episode_uid` and `sim_time_s`. In the `robot`
 and `object` columns, a value that may be NaN may also be given as None. The writer copies what it
 keeps, so a caller may refill one set of arrays for every frame and step. A frame or a step that

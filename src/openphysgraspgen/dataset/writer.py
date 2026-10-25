@@ -428,7 +428,8 @@ class EpisodeWriter:
         """One published frame. Frames are consecutive on the fps grid: each one's
         sim_step is the previous one's plus recorded_fps / fps. Its robot and object
         values and force magnitudes must equal the trajectory's at its step, whichever
-        of the two is added first.
+        of the two is added first. Without contacts, each contact array may be any
+        array without rows, such as np.array([]).
 
         camera.<camera>.world_to_camera must be rigid to within 1e-6, which a rotation
         computed in float32 can miss: compute it in float64.
@@ -472,6 +473,9 @@ class EpisodeWriter:
             for key, field_name in CONTACT_INPUTS.items():
                 dtype, shape = fmt.CONTACT_FIELDS[field_name]
                 array = np.asarray(frame[key])
+                if array.shape[:1] == (0,):
+                    # No contacts: np.array() of an empty list is (0,) float64.
+                    array = np.empty((0, *shape), dtype)
                 n = array.shape[0] if array.ndim else -1
                 if array.shape != (n, *shape) or n < 0:
                     raise ValueError(

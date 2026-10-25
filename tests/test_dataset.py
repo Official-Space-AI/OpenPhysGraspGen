@@ -277,6 +277,29 @@ def test_the_writer_keeps_copies_of_what_it_is_given(tmp_path):
         )
 
 
+def test_a_frame_without_contacts_may_give_arrays_without_rows(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    # np.array([c.force for c in contacts]) of no contacts is (0,) float64, whatever
+    # the field; an empty list, or no rows of another shape or type, is none either.
+    empties = [np.array([]), [], np.zeros((0, 2), dtype=np.int64)]
+    with open_episode(recorder) as episode:
+        for i, empty in enumerate(empties):
+            frame = make_frame(2 * (i + 1), recorder.spec, n_contacts=0)
+            frame.update(dict.fromkeys(writer_module.CONTACT_INPUTS, empty))
+            episode.add_frame(frame)
+        pressed = make_frame(8, recorder.spec)
+        episode.add_frame(pressed)
+        for step in range(1, 9):
+            episode.add_step(make_step(step))
+    data = read_frames(recorder.files("apple", "ep-0").frames)
+    assert data["force.n_contacts"].tolist() == [0, 0, 0, 2]
+    assert data["force.contact_offset"].tolist() == [0, 0, 0, 0, 2]
+    for key in writer_module.CONTACT_INPUTS:
+        np.testing.assert_array_equal(
+            data[key], np.asarray(pressed[key], dtype=data[key].dtype), key
+        )
+
+
 def test_the_value_rules_accept_what_the_reader_returns(tmp_path):
     # The dataset's check applies the writer's rules, in check_dataset.py, to read data.
     spec = make_spec()
