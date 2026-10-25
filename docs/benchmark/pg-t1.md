@@ -416,6 +416,10 @@ and no check failed, `incomplete` when an episode was refused or a file is not l
 - Under `search_lift_hold_carry_place_10cm` the plan keeps the object airborne for the task's 3.0 s,
   and B's 241-row window fits it by only a few rows, so B's `held` and `placed` there partly measure
   the schedule.
+- Under `lift_hold_retry` the first rise in the recording decides B and C, so the task's rates
+  measure the first attempt that lifts the object, not the recovery: when that attempt drops the
+  object inside a criterion's window, `held` is false under that criterion whatever the second
+  attempt does.
 - `frames_per_waypoint` is the configured schedule. Under a timing perturbation the waypoints before
   the close fly more or fewer rows; the rows before the hold then move with the whole plan, so the
   decidable windows stay as computed, and the scorer refuses a block that scales a later phase.
