@@ -357,7 +357,7 @@ run the script without `-I`, since it drops its own folder from the path either 
 | `--seed N` | the tester's seed, which draws the consistency samples; required when that item runs |
 | `--json PATH` | also write the whole report as JSON |
 | `--workers N` | threads that hash and read the files (default: the CPU count, at most 8) |
-| `--only ITEMS` | comma-separated items to run, from `scale,metadata,consistency,diversity` |
+| `--only ITEMS` | comma-separated items to run, from `scale,metadata,consistency,diversity`; a run of fewer than the four is partial: its `complete` is false |
 | `--criteria PATH` | other acceptance values; a run passes only with the published file |
 | `--sample N` | frames in each consistency sample; one smaller than the criteria's passes only when it holds every candidate frame |
 | `--no-checksums` | read every file without comparing its sha256; the metadata item cannot pass |
@@ -416,20 +416,21 @@ metadata              0 mismatches in 185 comparisons                           
   spec (in metadata)  6 of 6 GT channels, cameras front, wrist; failed: doi, download_url  6 channels, front, wrist, ...  FAIL
 consistency           steps 10/10 frames (100.00 %), sample 5/5; projection 5/5 of ...     100 % of frames; ...           PASS
 
-Overall: FAIL for the items run; not run: diversity
-RESULT {"pass": false, "items_run": ["scale", "metadata", "consistency"], "criteria": {...}, ...}
+Overall: FAIL (a partial run: diversity not run)
+RESULT {"pass": false, "complete": false, "items_run": ["scale", "metadata", "consistency"], ...}
 ```
 
-The `RESULT` line holds the verdict, the items run, the criteria's and the script's sha256 and
-whether each is the published one, the sha256 of `metadata.yaml`, and each item's headline
-numbers. Progress lines (`hashing:`, `reading:`, `projecting:`) and warnings go to standard error.
+The `RESULT` line holds the verdict, `complete` (whether all four items ran), the items run, the
+criteria's and the script's sha256 and whether each is the published one, the sha256 of
+`metadata.yaml`, and each item's headline numbers. The last line of the table names a partial
+run too. Progress lines (`hashing:`, `reading:`, `projecting:`) and warnings go to standard error.
 The JSON report is strict JSON: a value JSON cannot hold, such as a NaN in `metadata.yaml`, is
 written as a string.
 
 | Exit status | Meaning |
 |---|---|
-| 0 | every item run passed, with the published criteria and script |
-| 1 | the run completed and failed: an item failed, the criteria or the script are not the published ones, or `--no-checksums` was given with the metadata item |
+| 0 | every item run passed, with the published criteria and script. A run of fewer than the four items (`--only`) can exit 0: its `complete` is false |
+| 1 | the run finished and failed: an item failed, the criteria or the script are not the published ones, or `--no-checksums` was given with the metadata item |
 | 2 | the check could not run, or its report could not be written: a usage error, a missing or invalid criteria file or `metadata.yaml`, criteria values an item cannot apply, a dependency or Python too old, an interrupt, or a machine out of memory or file descriptors. The `RESULT` line gives the reason |
 
 Hashing reads every byte once. Reading decodes every column, about 1.6 ms a frame at 480 x 640

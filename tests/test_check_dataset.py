@@ -424,7 +424,7 @@ def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_pat
     assert err.splitlines()[1].startswith(
         f"reading: {N_DATA_FILES}/{N_DATA_FILES} files"
     )
-    assert payload["pass"] is True
+    assert (payload["pass"], payload["complete"]) == (True, True)
     assert payload["items_run"] == list(fmt.ITEMS)
     assert payload["scale"] == {
         "pass": True,
@@ -447,9 +447,10 @@ def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_pat
         raise ValueError(f"{text} in a strict JSON report")
 
     report = json.loads((tmp_path / "r").read_text(), parse_constant=strict)
-    assert report["pass"] is True
+    assert (report["pass"], report["complete"]) == (True, True)
     assert list(report) == [
         "pass",
+        "complete",
         "root",
         "format",
         "format_version",
@@ -894,16 +895,19 @@ def test_the_verdict_is_printed_before_the_report_is_written(
     )
 
 
-def test_only_runs_the_items_named_in_their_order(root, capsys):
+def test_only_runs_the_items_named_in_their_order(root, capsys, tmp_path):
     code, out, _, payload = main(capsys, root, "--only", " diversity , scale ,scale")
+    # A partial run that passes exits 0, and says it is partial.
     assert code == 0
+    assert (payload["pass"], payload["complete"]) == (True, False)
     assert payload["items_run"] == ["scale", "diversity"]
     assert "items run: scale, diversity (not run: metadata, consistency)" in out
     assert out.splitlines()[-2] == (
-        "Overall: PASS for the items run; not run: metadata, consistency"
+        "Overall: PASS (a partial run: metadata, consistency not run)"
     )
     assert set(payload) == {
         "pass",
+        "complete",
         "items_run",
         "criteria",
         "script",
@@ -911,6 +915,14 @@ def test_only_runs_the_items_named_in_their_order(root, capsys):
         "scale",
         "diversity",
     }
+    # Other criteria do not hide that the run is partial.
+    other = criteria_file(tmp_path, (root / CRITERIA).read_text() + "\n")
+    code, out, _, payload = main(capsys, root, "--only", "scale", "--criteria", other)
+    assert (code, payload["pass"], payload["complete"]) == (1, False, False)
+    assert out.splitlines()[-2] == (
+        "Overall: FAIL (the criteria or the script are not the ones metadata.yaml "
+        "publishes; a partial run: metadata, consistency, diversity not run)"
+    )
 
 
 def test_no_checksums_warns_and_fails(root, capsys):

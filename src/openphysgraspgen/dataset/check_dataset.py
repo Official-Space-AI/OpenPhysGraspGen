@@ -26,7 +26,7 @@ applied to every value. Video frames are counted from the MP4 index, without a d
 A run passes only with the script and the criteria file metadata.yaml lists. It prints
 a table and a ``RESULT {...}`` line, writes the whole report as JSON with ``--json``,
 and exits 0 when every item run passed, 1 when the run failed, and 2 when the check
-could not run.
+could not run; the RESULT line's complete says whether all four items ran.
 
 The same file defines the format: ``openphysgraspgen.dataset`` imports its names, value
 rules and file rules, so the writer, finalize and the check share one definition. The
@@ -4123,7 +4123,8 @@ def run_checks(
     """Run the items and return the report, which --json writes.
 
     The verdict needs every item run to pass and the run to apply the criteria file and
-    run the script that metadata.yaml publishes. criteria_path is the file the criteria
+    run the script that metadata.yaml publishes, and a run of fewer than the four items
+    can pass: complete says whether all four ran. criteria_path is the file the criteria
     were read from, and criteria_sha256 the digest of the bytes they were read from;
     given a path alone, the file is read, and its digest counts only when it holds the
     criteria. Without a path the criteria must equal the dataset's own. seed, the
@@ -4185,6 +4186,7 @@ def run_checks(
     )
     return {
         "pass": all(r["pass"] for r in results.values()) and published["pass"],
+        "complete": list(results) == list(ITEMS),
         "root": str(root),
         "format": FORMAT,
         "format_version": FORMAT_VERSION,
@@ -4405,20 +4407,28 @@ def format_table(report: Mapping[str, Any]) -> str:
                 lines.append(f"  {json.dumps(jsonable(entry), ensure_ascii=True)}")
     if "diversity" in report["items"]:
         lines += _diversity_lines(report["items"]["diversity"])
-    verdict = "PASS" if report["pass"] else "FAIL"
+    notes = []
     if not published["pass"]:
-        verdict += (
-            " (the criteria or the script are not the ones metadata.yaml publishes)"
+        notes.append(
+            "the criteria or the script are not the ones metadata.yaml publishes"
         )
-    elif report["items_not_run"]:
-        verdict += f" for the items run; not run: {', '.join(report['items_not_run'])}"
+    if not report["complete"]:
+        notes.append(f"a partial run: {', '.join(report['items_not_run'])} not run")
+    verdict = "PASS" if report["pass"] else "FAIL"
+    if notes:
+        verdict += f" ({'; '.join(notes)})"
     lines += ["", f"Overall: {verdict}"]
     return "\n".join(lines)
 
 
 def summary(report: Mapping[str, Any]) -> dict[str, Any]:
-    """The RESULT line's payload: the verdict and each item's headline numbers."""
-    out: dict[str, Any] = {"pass": report["pass"], "items_run": report["items_run"]}
+    """The RESULT line's payload: the verdict, whether every item ran, and each item's
+    headline numbers."""
+    out: dict[str, Any] = {
+        "pass": report["pass"],
+        "complete": report["complete"],
+        "items_run": report["items_run"],
+    }
     for key in ("criteria", "script"):
         p = report["published_tools"][key]
         out[key] = {"sha256": p["sha256"], "matches_published": p["matches_published"]}
@@ -4527,7 +4537,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog=(
             "exit status: 0 every item run passed with the published criteria and "
-            "script; 1 the run completed and failed; 2 the check could not run"
+            "script (a run of fewer than the four items says complete: false); 1 the "
+            "run finished and failed; 2 the check could not run"
         ),
     )
     parser.add_argument(
