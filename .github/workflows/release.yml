@@ -114,8 +114,8 @@ jobs:
           docker run --rm "$image:$tag" --fracture-threshold 0.25 --confidence-threshold 0.5 > /dev/null
           echo "IMAGE=$image" >> "$GITHUB_ENV"
           echo "TAG=$tag" >> "$GITHUB_ENV"
-      # The image SBOM lists every package in the image, the base image's Debian packages
-      # included, with its license, as the policy for container base images requires.
+      # Syft lists the packages in the image, the base image's Debian packages included,
+      # with the licenses it can read from them.
       - name: Generate the image SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3 (Syft v1.54.0)
         with:
@@ -123,6 +123,15 @@ jobs:
           format: spdx-json
           output-file: sbom/openphysgraspgen-image-${{ github.ref_name }}.spdx.json
           upload-artifact: false
+      # The policy for container base images requires a license for every package in the
+      # image SBOM. This adds the licenses Syft cannot read and the libraries the NumPy
+      # wheel bundles in numpy.libs, and fails if a package is still without a license.
+      - name: Complete the image SBOM
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE:$TAG" \
+            -c 'ls -d /usr/local/lib/python3*/site-packages/numpy.libs/*' > "$RUNNER_TEMP/numpy-libs.txt"
+          python3 .github/scripts/complete_image_sbom.py \
+            "sbom/openphysgraspgen-image-$GITHUB_REF_NAME.spdx.json" "$RUNNER_TEMP/numpy-libs.txt"
       # Fails on a known vulnerability of severity high or above that has a fix, which means
       # the pinned base image is out of date (see RELEASING.md).
       - name: Scan the image SBOM for fixable vulnerabilities

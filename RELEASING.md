@@ -12,8 +12,10 @@ Releases are cut by pushing a version tag. The `Release` workflow
    severity high or above is found,
 5. publishes the sdist and wheel to PyPI as `openphysgraspgen`,
 6. builds the container image from the same wheel on the official Python image pinned in the
-   `Dockerfile`, generates its SBOM, fails if a known vulnerability of severity high or above
-   has a fix, pushes it to `ghcr.io/official-space-ai/openphysgraspgen` and attests it,
+   `Dockerfile`, generates its SBOM, completes it with `.github/scripts/complete_image_sbom.py`
+   (the licenses Syft cannot read and the libraries bundled in the NumPy wheel), fails if a
+   package in it has no license or if a known vulnerability of severity high or above has a
+   fix, pushes the image to `ghcr.io/official-space-ai/openphysgraspgen` and attests it,
 7. attests the build provenance and the SBOM, and creates a GitHub release with the sdist,
    wheel, the three SBOMs and `SHA256SUMS` attached. Tags ending in `aN`, `bN` or `rcN` are
    marked as pre-releases.
