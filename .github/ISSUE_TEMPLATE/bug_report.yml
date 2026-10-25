@@ -18,8 +18,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: physgraspgen version or commit
-      placeholder: "0.1.0b0 or a commit SHA"
+      label: openphysgraspgen version or commit
+      placeholder: "1.0.0rc1 or a commit SHA"
     validations: {required: true}
   - type: input
     id: env
