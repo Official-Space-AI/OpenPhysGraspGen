@@ -153,7 +153,7 @@ An episode that breaks one of these rules is refused: it is not scored, its rule
 
 | Word | Rule |
 |---|---|
-| `listing` | `metadata.yaml` lists the episode's uid and object type as strings and its path under the dataset's root, and the file holds that episode of that object type |
+| `listing` | `metadata.yaml` lists the episode's uid and object type as strings and its path under the dataset's root, no earlier entry lists that uid and object type, and the file holds that episode of that object type |
 | `unreadable` | the trajectory file and its footer can be read |
 | `format` | the footer says `physgraspgen-public` 2.0 |
 | `label` | the footer's `label` is `success`, `fracture`, `fail` or `unknown` |
@@ -165,8 +165,9 @@ An episode that breaks one of these rules is refused: it is not scored, its rule
 | `task_block` | the task block follows the tables above |
 | `phase_row` | every row's waypoint is a waypoint of the plan and its phase is that waypoint's phase |
 
-A trajectory file under `trajectories/` that `metadata.yaml` does not list is not scored and is
-counted under `unlisted`.
+An episode that `metadata.yaml` lists more than once is scored at most once, from its first
+entry. A trajectory file under `trajectories/` that `metadata.yaml` does not list is not scored and
+is counted under `unlisted`.
 
 ## The rules
 

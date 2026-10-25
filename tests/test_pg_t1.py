@@ -1702,6 +1702,26 @@ def test_the_listing_must_describe_the_file(tmp_path):
     assert report["episodes"]["unlisted"] == 2
 
 
+def test_an_episode_listed_twice_is_scored_once(tmp_path):
+    write(tmp_path, lift_holds(2))
+    path = tmp_path / "metadata.yaml"
+    meta = yaml.safe_load(path.read_text())
+    trajectories = [f for f in meta["files"] if f["kind"] == "trajectory"]
+    meta["files"].append(dict(trajectories[0]))
+    path.write_text(yaml.safe_dump(meta))
+    report, episodes = score_dataset(tmp_path)
+    assert [(e["episode_uid"], e.get("refused")) for e in episodes] == [
+        ("ep-0", None),
+        ("ep-0", "listing"),
+        ("ep-1", None),
+    ]
+    assert episodes[1]["detail"] == (
+        "metadata.yaml lists episode 'ep-0' of 'apple' more than once"
+    )
+    assert report["tasks"]["lift_hold"]["overall"]["n"] == 2
+    assert report["status"] == "incomplete"
+
+
 def edit_footer(path, **changes):
     """Rewrite a trajectory file with these changes to its footer metadata."""
     meta = json.loads(pq.read_metadata(path).metadata[b"physgraspgen"])

@@ -249,6 +249,8 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
     records: list[dict[str, Any]] = []
     refused: list[dict[str, Any]] = []
     episodes: list[dict[str, Any]] = []
+    # The episodes an earlier entry lists: no episode is scored twice.
+    seen: set[tuple[str, str]] = set()
     for entry in entries:
         uid, object_type = entry.get("episode_uid"), entry.get("object_type")
         rel = PurePosixPath(str(entry.get("path")))
@@ -260,6 +262,13 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
                     f"metadata.yaml lists episode_uid {uid!r} and object_type "
                     f"{object_type!r}; both must be strings",
                 )
+            if (object_type, uid) in seen:
+                raise Refused(
+                    "listing",
+                    f"metadata.yaml lists episode {uid!r} of {object_type!r} more "
+                    "than once",
+                )
+            seen.add((object_type, uid))
             if rel.is_absolute() or ".." in rel.parts:
                 raise Refused(
                     "listing", f"{entry.get('path')!r} is not a path under the root"
