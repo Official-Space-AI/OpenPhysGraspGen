@@ -197,7 +197,7 @@ Both Parquet files of an episode carry the same metadata as JSON under the foote
 | `video` | the encoder settings (see Videos), or null without RGB |
 | `ffmpeg_version` | the first line of `ffmpeg -version` of the build that encoded the videos, or null without RGB |
 | `facts` | per-episode values the diversity tables read, nested by kind. `material`, `placement`, `lighting` and `camera` are each a mapping holding at least one value that is not null; other kinds may be added |
-| `task` | what benchmark scoring reads besides the trajectory. Its keys are defined by the PG-T1 scorer (issue #20); until then it is free-form, or null |
+| `task` | what benchmark scoring reads besides the trajectory: the [task block](../benchmark/pg-t1.md#the-task-block) of PG-T1, or null. The writer does not check its keys; the PG-T1 scorer refuses an episode whose block is null or does not follow that page |
 | `header`, `generation_provenance`, `export_provenance` | the generator's episode header and the records of the code and data that generated and exported it, or null |
 | `source_n_frames`, `source_cut_at_row` | the generator's frame count, which `n_steps` equals when the trajectory holds every step the generator recorded, or null when it is unknown; and the row the export stopped at because a frame missed a layer (-1 when it did not stop early) |
 
