@@ -74,6 +74,22 @@ from openphysgraspgen.dataset import writer as writer_module
 # --- writing and reading -----------------------------------------------------------
 
 
+def null_counts(table):
+    """Each column's nulls, those of its lists' values and its structs' fields too."""
+    counts = {}
+    for name in table.column_names:
+        arrays, counts[name] = [table.column(name).combine_chunks()], 0
+        while arrays:
+            array = arrays.pop()
+            counts[name] += array.null_count
+            kind = array.type
+            if pa.types.is_struct(kind):
+                arrays += array.flatten()
+            elif pa.types.is_list(kind) or pa.types.is_fixed_size_list(kind):
+                arrays.append(array.flatten())
+    return counts
+
+
 def test_an_episode_reads_back_as_written(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     frames = write_episode(recorder, source_n_frames=10)
@@ -145,6 +161,11 @@ def test_an_episode_reads_back_as_written(tmp_path):
         for name in ("robot.arm_q", "robot.grip_contact_width_m", "object.bbox_max"):
             if step != 3 or name not in fmt.NOT_FINITE_COLUMNS:
                 np.testing.assert_array_equal(trajectory[name][i], row[name], name)
+    # The reader returns a float null as NaN, so the NaNs above could be nulls: no
+    # column, list or struct field of either file holds one.
+    for path in (files.frames, files.trajectory):
+        table = pq.read_table(path)
+        assert null_counts(table) == dict.fromkeys(table.column_names, 0), path
 
     meta = episode_metadata(files.frames)
     assert set(meta) == set(fmt.EPISODE_KEYS)
