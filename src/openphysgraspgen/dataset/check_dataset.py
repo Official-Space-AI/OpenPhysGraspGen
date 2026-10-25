@@ -1412,14 +1412,18 @@ CRITERIA = {
     ),
 }
 # The dataset test's own values (docs/dataset/format.md): at least 1,000,000 frames, no
-# mismatch, every frame of both consistency parts on these four layers, and at least 10
-# object types. The criteria a dataset publishes may be weaker; the report says so.
+# mismatch, every frame of both consistency parts, the step part on these four layers
+# and every point a camera sees landing on the object, and at least 10 object types.
+# The criteria a dataset publishes may be weaker; the report says so. The test gives no
+# projection radius (4 px is a placeholder until agreed), sample size, specification or
+# fact kinds, so those are not compared.
 TEST_DEFINITION = {
     "scale": {"min_frames": 1_000_000},
     "metadata": {"max_mismatches": 0},
     "consistency": {
         "min_pass_fraction": 1.0,
         "layers": ["rgb", "depth", "force", "stress"],
+        "min_point_fraction": 1.0,
     },
     "diversity": {"min_object_types": 10},
 }
@@ -1427,9 +1431,10 @@ TEST_DEFINITION = {
 
 def meets_test_definition(criteria: Mapping[str, Any]) -> bool:
     """Whether criteria are at least as strict as TEST_DEFINITION, whichever items run:
-    as many frames and object types or more, as many mismatches or fewer, and as high a
-    pass fraction on the test's layers and any others. A value that is missing, or that
-    its item could not apply, meets nothing."""
+    as many frames and object types or more, as many mismatches or fewer, as high a
+    pass fraction on the test's layers and any others, and as high a fraction of each
+    camera's points on the object. A value that is missing, or that its item could not
+    apply, meets nothing."""
 
     def value(item: str, key: str) -> Any:
         table = criteria.get(item)
@@ -1449,6 +1454,11 @@ def meets_test_definition(criteria: Mapping[str, Any]) -> bool:
         )
         and _names(layers, CHANNELS)
         and set(test["consistency"]["layers"]) <= set(layers)
+        and _number(
+            value("consistency", "min_point_fraction"),
+            test["consistency"]["min_point_fraction"],
+            1,
+        )
         and _is_int(
             value("diversity", "min_object_types"),
             test["diversity"]["min_object_types"],

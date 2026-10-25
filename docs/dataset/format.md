@@ -401,8 +401,12 @@ A pass says that the dataset meets the criteria it was published with, which fin
 `criteria=` can make weaker than the test. So beside whether the criteria are the published ones,
 the report says whether they are at least as strict as the dataset test, as
 `meets_test_definition`: `min_frames` of at least 1,000,000, `max_mismatches` of 0, a
-`min_pass_fraction` of 1.0 on at least the layers `rgb`, `depth`, `force` and `stress`, and
-`min_object_types` of at least 10. It changes neither the verdict nor the exit status.
+`min_pass_fraction` of 1.0 on at least the layers `rgb`, `depth`, `force` and `stress`, a
+`min_point_fraction` of 1.0, and `min_object_types` of at least 10. These are the values the test
+gives, and the only ones compared, so a yes says nothing of the others: `projection_radius_px`, a
+placeholder until it is agreed, the sample sizes `sample_frames` and `min_contact_frames`, the
+specification's channels, cameras and licence, and `required_fact_kinds`. It changes neither the
+verdict nor the exit status.
 
 ### What it prints
 

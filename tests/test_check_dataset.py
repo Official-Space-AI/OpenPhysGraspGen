@@ -588,10 +588,17 @@ def test_the_package_ships_the_published_acceptance_values():
         ("consistency", "min_pass_fraction", 1, True),
         ("consistency", "layers", ["rgb", "depth", "force"], False),
         ("consistency", "layers", list(fmt.CHANNELS), True),
+        ("consistency", "min_point_fraction", 0.999, False),
+        ("consistency", "min_point_fraction", 1, True),
         ("diversity", "min_object_types", 9, False),
         ("diversity", "min_object_types", 30, True),
         # The test gives no tolerance of its own: it is to be agreed.
         ("consistency", "projection_radius_px", 40.0, True),
+        # Nor a sample size, a specification or fact kinds: none of them is compared.
+        ("consistency", "sample_frames", 1, True),
+        ("consistency", "min_contact_frames", 0, True),
+        ("metadata", "required_channels", [], True),
+        ("diversity", "required_fact_kinds", [], True),
         # A value no item could apply meets nothing, and raises nothing.
         ("scale", "min_frames", "1000000", False),
         ("scale", "min_frames", True, False),
