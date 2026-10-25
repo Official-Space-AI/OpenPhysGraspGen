@@ -253,16 +253,20 @@ rested at the start. Each failed condition gives its word: `never_released`,
 **The put-down** (the two tasks that carry). The internal hold is the task's own (4.0 s or 3.0 s)
 from the crossing of `lift_success_m`, read as B reads its window; when it is not true, `placed` is
 not reached. The jaws open on the first row of the first run of `open_ramp_frames` rows whose
-commanded width exceeds the widest width of that hold by more than `grip_force_open_deadband_m`.
+commanded width exceeds the widest width of that hold by more than `grip_force_open_deadband_m`,
+and they are fully open on the row after that run, `open_ramp_frames` rows after the opening.
 
-The carry runs from the crossing to the opening (to the end when the jaws never open). It is judged
-when the episode stopped on a drop, or when the carry phase is complete and the jaws opened or the
-place phase is complete. It fails when the drop stop came before any opening (`dropped_in_carry`),
-when the object moved more than `carry_slip_tol_m` in the jaws (`slipped_in_jaws`: its offset from
-the tool point, read in the reached tool frame as the position along the jaw axis and the distance
-from it), or when a row whose lowest point is less than `place_release_drop_tol_m` over its rest
-height lies more than `place_tol_m` in plan from where the object is at the opening, or at the last
-carried row when the jaws never open (`dragged`). A failed carry is a failed placement.
+The carried rows are the rows with a centroid from the crossing to the row before the opening, or to
+the last row when the jaws never open. The carry is judged when the episode stopped on a drop, or
+when the carry phase is complete and the jaws opened or the place phase is complete. It fails when
+the drop stop came before any opening (`dropped_in_carry`), when the object slipped more than
+`carry_slip_tol_m` in the jaws (`slipped_in_jaws`), or when a carried row whose lowest point is less
+than `place_release_drop_tol_m` over its rest height lies more than `place_tol_m` in plan from where
+the object is at the opening, or at the last carried row when the jaws never open (`dragged`). A
+failed carry is a failed placement. The slip is read from the object's offset from the tool point in
+the reached tool frame: a is its position along the jaw axis, the tool's y axis, and r its distance
+from that axis. With a0 and r0 those of the first carried row with a tool pose, the slip is the
+largest `hypot(a - a0, r - r0)` over the carried rows with one.
 
 After a good carry, and when both place waypoints and both retreat waypoints are complete, the
 judged span runs from the opening for `opening_to_end_frames` rows, clamped to the recording. With
@@ -276,7 +280,7 @@ object is placed when all seven checks pass:
 | `set_down_too_fast` | over the 3 rows before it first came within 1 mm of its rest height underneath, it came down faster than `set_down_speed_max_m_s` |
 | `fell_on_release` | it fell more than `place_release_drop_tol_m` from the opening to the final row |
 | `pushed_after_release` | it moved more than half of `place_tol_m` in plan from the opening to the final row |
-| `still_touching` | a robot contact remains after the row the jaws are fully open, or no row follows it |
+| `still_touching` | a robot contact remains on a row of the span after the row the jaws are fully open, or the span has no row after it |
 | `not_at_rest` | over the last `rest_window_frames` rows of the span it wanders more than `place_rest_radius_m` from its last position |
 
 A jaw that never opens fails with `never_opened`. When the placement cannot be judged, `placed`
@@ -286,7 +290,8 @@ is not reached and the record says why: `internal_lift_not_met`, `internal_hold_
 `empty_rest_window`, which no generator recording reaches; for the put-back `no_usable_rows`,
 `fewer_than_10_rows_after_hold`, `no_grip_width`, `ee_pose_missing` or `too_few_carried_rows`.
 The record of a put-down also holds the facts the generator records for it, under the generator's
-names.
+names, among them `set_down_bench_force_peak_n`, the highest bench force from the crossing to the
+row the jaws are fully open.
 
 ### Decidable windows
 
