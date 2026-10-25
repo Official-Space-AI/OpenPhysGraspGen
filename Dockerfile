@@ -26,13 +26,31 @@ RUN printf '%s\n' \
     "" \
     "  ${BASE_IMAGE}" \
     "" \
-    "The base image holds Debian packages under their own licenses, some of them GPL or" \
-    "LGPL. The SBOM attached to each GitHub release lists every package in the image with" \
-    "its version and license. Their source is available from Debian at those versions" \
-    "(https://snapshot.debian.org, https://sources.debian.org). For three years after an" \
-    "image is released we also provide, to anyone who asks, the corresponding source of" \
-    "any GPL or LGPL package in it: write to oss.spaceai@gmail.com with the image tag and" \
-    "the package names." \
+    "The SBOM attached to each GitHub release lists every package in the image with its" \
+    "version and license. Its components under the GPL, the LGPL, the MPL-2.0 or another" \
+    "license that requires their source to be available are:" \
+    "" \
+    "- The Debian packages of the base image, many of them GPL or LGPL. ca-certificates" \
+    "  holds the Mozilla CA list under the MPL-2.0, and libdb5.3t64 is Berkeley DB under" \
+    "  the Sleepycat license. Their source is available from Debian at those versions" \
+    "  (https://snapshot.debian.org, https://sources.debian.org)." \
+    "- certifi, which pip vendors: the same Mozilla CA list under the MPL-2.0, in source" \
+    "  form in the image." \
+    "- Python ${PYTHON_VERSION} (CPython), whose modules link Berkeley DB, GNU dbm and GNU" \
+    "  Readline. The official image compiles it, without changes, from the source release" \
+    "  https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" \
+    "  with the Dockerfile at" \
+    "  https://github.com/docker-library/python/blob/master/3.12/slim-trixie/Dockerfile" \
+    "  (its history has the revision that built this image)." \
+    "- The GCC runtime libraries that the NumPy wheel bundles in numpy.libs: libgfortran," \
+    "  GPL-3.0-or-later with the GCC Runtime Library Exception 3.1, and libquadmath," \
+    "  LGPL-2.1-or-later. Their source is part of GCC (https://gcc.gnu.org)." \
+    "" \
+    "For three years after an image is released we also provide, to anyone who asks, the" \
+    "corresponding source of any component in it under the GPL, the LGPL, the MPL-2.0 or" \
+    "another license that requires source availability, including the CPython build and" \
+    "the GCC runtime libraries above: write to oss.spaceai@gmail.com with the image tag" \
+    "and the component names." \
     > /usr/share/doc/openphysgraspgen/NOTICE.container
 
 LABEL org.opencontainers.image.title="OpenPhysGraspGen" \
