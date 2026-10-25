@@ -25,3 +25,13 @@ path = [
 ]
 SPDX-FileCopyrightText = "Copyright (c) 2026 SpaceAI"
 SPDX-License-Identifier = "Apache-2.0"
+
+# The Code of Conduct is the Contributor Covenant 2.0, which is licensed under
+# CC-BY-4.0; the project only filled in its contact details.
+[[annotations]]
+path = "CODE_OF_CONDUCT.md"
+SPDX-FileCopyrightText = [
+    "2014 Coraline Ada Ehmke",
+    "Copyright (c) 2026 SpaceAI",
+]
+SPDX-License-Identifier = "CC-BY-4.0"
