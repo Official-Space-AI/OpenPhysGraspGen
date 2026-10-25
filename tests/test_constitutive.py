@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from physgraspgen import (
+from openphysgraspgen import (
     MooneyRivlinParams,
     OgdenParams,
     YeohParams,
