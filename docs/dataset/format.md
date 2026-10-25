@@ -305,9 +305,10 @@ stores them.
 With `check_seed=`, finalize then runs the `tools/check_dataset.py` it wrote on the dataset, with
 the running interpreter and that seed, and the metadata it returns holds `check`: the check's exit
 status and its `RESULT` payload. A failed check is returned as such, and the check fails until
-`doi` and `download_url` are given; a check that could not run raises `DatasetError`. That the
-script needs nothing but NumPy, PyArrow and PyYAML is shown by the tests, which run it with
-nothing else importable.
+`doi` and `download_url` are given. A check that could not run raises `DatasetError` although the
+dataset was not refused: the tool files, `.gitattributes`, `metadata.yaml` and `SHA256SUMS` are
+written by then, and finalizing again replaces them. That the script needs nothing but NumPy,
+PyArrow and PyYAML is shown by the tests, which run it with nothing else importable.
 
 ## Conventions
 

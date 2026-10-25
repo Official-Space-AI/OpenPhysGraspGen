@@ -147,7 +147,8 @@ def _links(root: Path) -> list[str]:
 
 def _published_check(root: Path, seed: int, workers: int) -> dict[str, Any]:
     """Run the dataset's own tools/check_dataset.py on it with this interpreter, and
-    return its exit status and RESULT payload; a check that could not run is refused."""
+    return its exit status and RESULT payload. A check that could not run raises
+    DatasetError, though the dataset's files are written."""
     root = root.resolve()
     done = subprocess.run(
         [
@@ -203,8 +204,10 @@ def finalize_dataset(
     With check_seed, the tools/check_dataset.py written then checks the dataset with
     that seed, run by this interpreter, and the metadata returned holds `check`: its
     exit status and RESULT payload. A failed check is returned as such, and the check
-    fails until doi and download_url are given; one that could not run raises
-    DatasetError.
+    fails until doi and download_url are given. One that could not run raises
+    DatasetError although the dataset was not refused: tools/, .gitattributes,
+    metadata.yaml and SHA256SUMS are written by then, and finalizing again replaces
+    them.
     """
     root = Path(root)
     errors: list[str] = []

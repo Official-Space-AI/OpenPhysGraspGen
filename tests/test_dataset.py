@@ -1648,6 +1648,32 @@ def test_finalize_replaces_the_part_files_of_a_finalize_that_was_stopped(tmp_pat
     ]
 
 
+def test_finalize_writes_the_dataset_before_a_check_that_could_not_run(
+    tmp_path, monkeypatch
+):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    write_episode(recorder)
+
+    def refused(args, **kwargs):
+        stdout = 'RESULT {"pass": false, "reason": "no NumPy"}\n'
+        return subprocess.CompletedProcess(args, 2, stdout=stdout)
+
+    monkeypatch.setattr(finalize_module.subprocess, "run", refused)
+    with pytest.raises(DatasetError, match="the dataset check could not run"):
+        recorder.finalize(check_seed=7)
+    # The dataset was not refused: its files are written, as without check_seed.
+    assert files_under(tmp_path) == [
+        ".gitattributes",
+        "SHA256SUMS",
+        "data/apple/ep-0.parquet",
+        "metadata.yaml",
+        "tools/check_criteria.yaml",
+        "tools/check_dataset.py",
+        "trajectories/apple/ep-0.parquet",
+    ]
+    assert read_metadata(tmp_path)["counts"]["n_files"] == 2
+
+
 def test_finalize_refuses_object_types_that_differ_in_case(tmp_path):
     sensitive = _case_sensitive(tmp_path)
     recorder = GraspDataRecorder(tmp_path, make_spec())
