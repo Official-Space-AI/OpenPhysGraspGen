@@ -338,8 +338,10 @@ whose window is decidable):
 - The population states which episodes the dataset holds: the labels the generation run kept and
   whether it kept only lifted episodes. A table over such a corpus is conditional on the lift: on
   every task but `search_lift_hold_2s`, with a generator threshold of at least 12 cm, its B
-  `lifted` rate is 1.0 by construction. The labels of the scored episodes are counted; damage
-  itself is not part of PG-T1.
+  `lifted` rate is 1.0 by construction. `keep_labels` is compared as a set and listed in the order
+  `success`, `fracture`, `fail`, `unknown`; it and `keep_requires_lift` are `mixed` when the task's
+  episodes disagree. The labels of the scored episodes are counted; damage itself is not part of
+  PG-T1.
 
 A cell no episode can decide is null and prints as "not planned", "not decidable" or "not
 reached", never as 0. Floor-arm baselines are scored the same way and reported apart, under

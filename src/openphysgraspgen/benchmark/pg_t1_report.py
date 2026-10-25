@@ -28,6 +28,7 @@ from .pg_t1 import (
     FLOOR_ARMS,
     FORMAT,
     FORMAT_VERSION,
+    LABELS,
     SCORER_ID,
     STAGES,
     TASKS,
@@ -133,6 +134,11 @@ def _common(values: Sequence[Any]) -> Any:
     return first if all(v == first for v in values) else "mixed"
 
 
+def _kept(labels: Sequence[str] | None) -> list[str] | None:
+    """The labels a generation run kept, in the order LABELS lists them."""
+    return None if labels is None else [x for x in LABELS if x in labels]
+
+
 def _task_entry(name: str, records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     task = TASKS[name]
     types: dict[str, list[Mapping[str, Any]]] = {}
@@ -144,7 +150,7 @@ def _task_entry(name: str, records: Sequence[Mapping[str, Any]]) -> dict[str, An
         "placed_rule": task.placed_rule,
         "n_object_types": len(types),
         "population": {
-            "keep_labels": _common([r["keep_labels"] for r in records]),
+            "keep_labels": _common([_kept(r["keep_labels"]) for r in records]),
             "keep_requires_lift": _common([r["keep_requires_lift"] for r in records]),
             "labels": dict(sorted(labels.items(), key=lambda kv: (-kv[1], str(kv[0])))),
         },

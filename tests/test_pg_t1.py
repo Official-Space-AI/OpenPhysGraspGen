@@ -1816,6 +1816,24 @@ def test_the_table_states_the_population_it_scores(tmp_path):
     assert "population episodes kept under different rules" in lines
 
 
+def test_labels_kept_in_another_order_are_one_population(tmp_path):
+    rows = ramp("lift_hold", LH, 0.15)
+    reordered = block("lift_hold", LH, keep_labels=["fracture", "success", "fracture"])
+    write(
+        tmp_path,
+        [
+            episode("ep-0", rows, block("lift_hold", LH)),
+            episode("ep-1", rows, reordered),
+        ],
+    )
+    report = scored(tmp_path)[0]
+    assert report["tasks"]["lift_hold"]["population"]["keep_labels"] == [
+        "success",
+        "fracture",
+    ]
+    assert "population episodes kept under different rules" not in printed(report)
+
+
 def test_scores_are_pooled_over_object_types_and_given_per_type(tmp_path):
     write(
         tmp_path,
