@@ -151,9 +151,10 @@ deformation gradient (N, T, 3, 3).
 - `robot.phase` is a nonempty string, here and in the trajectory.
 - A mask value is the index of a segmentation class, 0 to 5. Depth and `stress.volume_ratio` have
   no rule beyond their type.
-- A frame's `robot` and `object` columns, and its two force magnitudes, hold the trajectory's
-  values at the frame's step, NaN where the trajectory's is NaN. A frame therefore lies on a step
-  whose object state is finite.
+- A frame's `robot` and `object` columns that the trajectory also has (all but
+  `object.n_soft_contacts` and `object.n_rigid_contacts`), and its two force magnitudes, hold the
+  trajectory's values at the frame's step, NaN where the trajectory's is NaN. A frame therefore lies
+  on a step whose object state is finite.
 
 ## Trajectory file
 

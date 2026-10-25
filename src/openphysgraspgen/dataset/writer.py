@@ -427,9 +427,9 @@ class EpisodeWriter:
     def add_frame(self, frame: Mapping[str, Any]) -> None:
         """One published frame. Frames are consecutive on the fps grid: each one's
         sim_step is the previous one's plus recorded_fps / fps. Its robot and object
-        values and force magnitudes must equal the trajectory's at its step, whichever
-        of the two is added first. Without contacts, each contact array may be any
-        array without rows, such as np.array([]).
+        values that the trajectory also has, and its force magnitudes, must equal the
+        trajectory's at its step, whichever of the two is added first. Without contacts,
+        each contact array may be any array without rows, such as np.array([]).
 
         camera.<camera>.world_to_camera must be rigid to within 1e-6, which a rotation
         computed in float32 can miss: compute it in float64.
