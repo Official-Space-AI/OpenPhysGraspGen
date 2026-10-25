@@ -304,7 +304,8 @@ def fake_av1(directory):
 
 # A small image: the object fills rows 3 to 12 and columns 6 to 17, the gripper's pads
 # the first three columns. Both cameras look along +z from near the origin, so a point
-# at z = 1 m with |x|, |y| <= 0.1 m lands on the object.
+# at z = 1 m with |x|, |y| <= 0.1 m lands on the object. At a scale k, each pixel is k x
+# k pixels and the focal lengths are k times longer, so a point lands where it did.
 SIZE = (16, 24)
 OBJECT_ROWS, OBJECT_COLS = slice(3, 13), slice(6, 18)
 DOI = "10.5281/zenodo.1234567"
@@ -319,24 +320,23 @@ EPISODES = (
 N_FRAMES = sum(n for _, _, n in EPISODES)
 
 
-def scene_spec(channels=fmt.CHANNELS, cameras=fmt.CAMERAS, **kwargs):
+def scene_spec(channels=fmt.CHANNELS, cameras=fmt.CAMERAS, scale=1, **kwargs):
     return DatasetSpec(
         name="unit-test",
         version="0.0.1",
         fps=30,
         recorded_fps=60,
-        image_size=dict.fromkeys(cameras, SIZE),
+        image_size=dict.fromkeys(cameras, (SIZE[0] * scale, SIZE[1] * scale)),
         channels=channels,
         frames_per_row_group=2,
         **kwargs,
     )
 
 
-def scene_intrinsics(camera):
-    f = 20.0 if camera == "front" else 18.0
-    return np.array(
-        [[f, 0.0, (SIZE[1] - 1) / 2], [0.0, f, (SIZE[0] - 1) / 2], [0, 0, 1]]
-    )
+def scene_intrinsics(camera, scale=1):
+    f = (20.0 if camera == "front" else 18.0) * scale
+    height, width = SIZE[0] * scale, SIZE[1] * scale
+    return np.array([[f, 0.0, (width - 1) / 2], [0.0, f, (height - 1) / 2], [0, 0, 1]])
 
 
 def scene_world_to_camera(camera):
@@ -345,11 +345,15 @@ def scene_world_to_camera(camera):
     return matrix
 
 
-def scene_mask():
+def _scaled(image, scale):
+    return image.repeat(scale, axis=0).repeat(scale, axis=1)
+
+
+def scene_mask(scale=1):
     mask = np.zeros(SIZE, dtype=np.uint8)
     mask[OBJECT_ROWS, OBJECT_COLS] = 1
     mask[:, :3] = 3
-    return mask
+    return _scaled(mask, scale)
 
 
 def scene_contacts(step, offset=0.0, pressed=True):
@@ -370,20 +374,22 @@ def scene_contacts(step, offset=0.0, pressed=True):
 
 
 def scene_frame(step, spec, n_contacts=None, offset=0.0, pressed=True):
-    """A frame of the scene: its pressed contacts land on the object in both cameras."""
+    """A frame of the scene: its pressed contacts land on the object in both cameras.
+    The spec's image size, SIZE times a scale, sets the scale."""
     frame = make_frame(step, spec)
     for camera in spec.cameras:
+        scale = spec.image_size[camera][0] // SIZE[0]
         if "rgb" in spec.channels:
             frame[f"rgb.{camera}.image"] = np.broadcast_to(
-                colour(step, camera), (*SIZE, 3)
+                colour(step, camera), (*spec.image_size[camera], 3)
             ).copy()
         if "depth" in spec.channels:
             depth = np.full(SIZE, 2.0, dtype=np.float32)
             depth[OBJECT_ROWS, OBJECT_COLS] = 1.0
-            frame[f"depth.{camera}.depth_m"] = depth
+            frame[f"depth.{camera}.depth_m"] = _scaled(depth, scale)
         if "segmentation" in spec.channels:
-            frame[f"segmentation.{camera}.mask"] = scene_mask()
-        frame[f"camera.{camera}.intrinsics"] = scene_intrinsics(camera)
+            frame[f"segmentation.{camera}.mask"] = scene_mask(scale)
+        frame[f"camera.{camera}.intrinsics"] = scene_intrinsics(camera, scale)
         frame[f"camera.{camera}.world_to_camera"] = scene_world_to_camera(camera)
     if "force" in spec.channels:
         frame.update(scene_contacts(step, offset, pressed))
@@ -433,11 +439,12 @@ def build_dataset(
     doi=DOI,
     download_url=URL,
     frame=scene_frame,
+    scale=1,
 ):
     """A dataset written by GraspDataRecorder and finalized with small criteria."""
     from openphysgraspgen.dataset import GraspDataRecorder
 
-    spec = scene_spec(channels, cameras)
+    spec = scene_spec(channels, cameras, scale=scale)
     recorder = GraspDataRecorder(root, spec, ffmpeg=ffmpeg or "ffmpeg")
     for object_type, uid, n in episodes:
         write_episode(
