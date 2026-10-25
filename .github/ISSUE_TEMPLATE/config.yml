@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions/categories/q-a
+    about: Ask questions in Discussions, not in issues.
+  - name: Feature idea (not yet scoped)
+    url: https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions/categories/ideas
+    about: Discuss an idea first; it becomes an issue once the scope is agreed.
+  - name: Security vulnerability
+    url: https://github.com/Official-Space-AI/OpenPhysGraspGen/security/advisories/new
+    about: Report privately. Never open a public issue for a vulnerability.

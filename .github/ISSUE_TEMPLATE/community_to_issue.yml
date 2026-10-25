@@ -1,0 +1,33 @@
+name: Community → issue
+description: Track a technical item that came up in a discussion, chat, email or meeting.
+title: "[Community]: "
+labels: ["community", "triage"]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Original discussion
+      placeholder: Public Discussion URL, or "internal meeting YYYY-MM-DD" if not public
+    validations: {required: true}
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem and expected result
+      description: Summarize without personal data or confidential information.
+    validations: {required: true}
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction and environment
+  - type: textarea
+    id: decision
+    attributes:
+      label: Agreed next step and owner
+    validations: {required: true}
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Publication check
+      options:
+        - label: This contains no unpublished vulnerabilities, credentials or personal data.
+          required: true
