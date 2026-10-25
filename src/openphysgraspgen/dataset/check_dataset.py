@@ -75,6 +75,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
@@ -144,6 +145,49 @@ EPISODE_KEYS = (
     "source_n_frames",
     "source_cut_at_row",
 )
+# The keys of metadata.yaml as finalize writes it, of its counts, of a type's entry in
+# object_types, of a files entry (n_steps for a trajectory, n_frames for the others) and
+# of a tools entry. Any other key states what the check cannot compare: a mismatch.
+METADATA_KEYS = (
+    "format",
+    "format_version",
+    "name",
+    "version",
+    "license",
+    "doi",
+    "download_url",
+    "created",
+    "fps",
+    "recorded_fps",
+    "channels",
+    "cameras",
+    "image_size",
+    "video",
+    "counts",
+    "object_types",
+    "files",
+    "tools",
+    "conventions",
+    "provenance",
+)
+COUNT_KEYS = (
+    "n_frames",
+    "n_episodes",
+    "n_files",
+    "n_object_types",
+    "n_object_assets",
+    "n_channels",
+)
+OBJECT_TYPE_KEYS = ("n_episodes", "n_frames", "assets")
+FILE_ENTRY_KEYS = {
+    kind: ("path", "kind", "episode_uid", "object_type", count, "sha256", "bytes")
+    for kind, count in (
+        ("frames", "n_frames"),
+        ("trajectory", "n_steps"),
+        ("video", "n_frames"),
+    )
+}
+TOOL_ENTRY_KEYS = ("path", "sha256", "bytes")
 # Object types, episode ids and camera names become path components, which every file
 # system a copy lands on must hold: no trailing dot, no device name of Windows, and a
 # length that leaves room for the rest of the path.
@@ -155,9 +199,12 @@ RESERVED_NAMES = frozenset(
     + tuple(f"lpt{i}" for i in range(1, 10))
 )
 # metadata.yaml's doi is a bare DOI whose registrant code is 4 to 9 digits, as Zenodo's
-# is, and its download_url an https URL, in printable ASCII.
+# is, and its download_url an https URL, in printable ASCII. Its created is the time
+# finalize wrote it, in UTC to the second, as a string: YYYY-MM-DDTHH:MM:SSZ.
 DOI_PATTERN = re.compile(r"10\.[0-9]{4,9}/[!-~]+")
 URL_PATTERN = re.compile(r"https://[!-~]+")
+CREATED_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+CREATED_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 # A column is (dtype, shape). The shape is () for one value, a tuple of sizes for a
 # fixed-size list of that many values stored row-major, "image" for one value per
@@ -2799,6 +2846,37 @@ class _Ledger:
         self.n_checked += 1
         self.items.append({"what": what, "metadata": metadata, "files": files})
 
+    def holds(self, what: str, metadata: Any, ok: bool) -> None:
+        """A value no file holds, held to its rule instead; what says how it breaks it."""
+        self.n_checked += 1
+        if not ok:
+            self.items.append({"what": what, "metadata": metadata, "files": None})
+
+    def extra(self, where: str, value: Any, keys: tuple[str, ...]) -> None:
+        """A mismatch for each key of the mapping value that the format does not define
+        there, with the value it states: nothing in the files is compared with it."""
+        if not isinstance(value, Mapping):
+            return
+        for key in value:
+            if key not in keys:
+                self.missing(
+                    f"{where}: key {_clip(repr(key))} is not in the format",
+                    value[key],
+                    None,
+                )
+
+
+def _is_created(value: object) -> bool:
+    """Whether value is a time that exists, as a string in UTC to the second:
+    YYYY-MM-DDTHH:MM:SSZ."""
+    if not isinstance(value, str) or not CREATED_PATTERN.fullmatch(value):
+        return False
+    try:
+        datetime.strptime(value, CREATED_FORMAT)
+    except ValueError:
+        return False
+    return True
+
 
 def _frames_files(ds: Dataset) -> list[DataFile]:
     return [rec for rec in ds.files if rec.kind == "frames" and rec.id is not None]
@@ -2864,11 +2942,18 @@ def check_metadata(
     ds: Dataset, metadata: Mapping[str, Any], criteria: Mapping[str, Any]
 ) -> dict[str, Any]:
     """metadata.yaml against the files: each value it states compared once, each
-    disagreement one mismatch, and the specification. Without checksums the sha256
-    comparisons are skipped and the item cannot pass."""
+    disagreement one mismatch, and the specification. Each key the format does not
+    define is a mismatch, and created, which no file holds, is held to its form.
+    Without checksums the sha256 comparisons are skipped and the item cannot pass."""
     ledger = _Ledger()
+    ledger.extra(METADATA_NAME, metadata, METADATA_KEYS)
     ledger.compare("format", metadata.get("format"), FORMAT)
     ledger.compare("format_version", metadata.get("format_version"), FORMAT_VERSION)
+    ledger.holds(
+        "created is not a time in UTC, YYYY-MM-DDTHH:MM:SSZ",
+        metadata.get("created"),
+        _is_created(metadata.get("created")),
+    )
     frames = _frames_files(ds)
     read = [rec for rec in frames if rec.footer is not None]
     counted = {
@@ -2886,6 +2971,7 @@ def check_metadata(
         c for c in CHANNELS if any(c in e.channels for e in ds.episodes.values())
     ]
     ledger.compare("counts.n_channels", counts.get("n_channels"), len(channels))
+    ledger.extra("counts", counts, COUNT_KEYS)
     ledger.compare("channels", metadata.get("channels"), channels)
     conventions = metadata.get("conventions")
     stated = conventions
@@ -2927,6 +3013,7 @@ def check_metadata(
             stated_row.get("assets"),
             sorted(row["assets"]),
         )
+        ledger.extra(f"object_types.{name}", stated_row, OBJECT_TYPE_KEYS)
 
     video = metadata.get("video")
     shared_video = video
@@ -2975,6 +3062,8 @@ def check_metadata(
         ledger.missing(problem, None, None)
     by_rel = {rec.rel: rec for rec in ds.files}
     for rel, entry in sorted(ds.listed.items()):
+        # A listed path is one the format defines, so its folder gives its kind.
+        ledger.extra(rel, entry, FILE_ENTRY_KEYS[_shape(rel)[0]])
         rec = by_rel.get(rel)
         if rec is None:
             ledger.missing(f"files: {rel} is listed but not on disk", rel, None)
@@ -3004,6 +3093,7 @@ def check_metadata(
         if rel not in ds.tools:
             ledger.missing(f"tools: {rel} is not listed", None, rel)
     for rel, entry in sorted(ds.tools.items()):
+        ledger.extra(rel, entry, TOOL_ENTRY_KEYS)
         if rel not in TOOL_FILES:
             ledger.missing(f"tools: {rel} is not a tool of the format", rel, None)
             continue

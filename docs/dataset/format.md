@@ -251,7 +251,7 @@ or ignore them.
 |---|---|
 | `format`, `format_version`, `name`, `version` | format and dataset identity |
 | `license`, `doi`, `download_url` | CC-BY-4.0; the Zenodo DOI as a bare DOI, `10.<registrant>/<suffix>` with a registrant code of 4 to 9 digits, without `https://doi.org/`; the download page, an `https://` URL. `doi` and `download_url` are null until given |
-| `created` | when the file was written (UTC) |
+| `created` | when the file was written, in UTC to the second, as a string: `YYYY-MM-DDTHH:MM:SSZ` |
 | `fps`, `recorded_fps`, `channels`, `cameras` | as in every episode |
 | `image_size` | per camera: `height`, `width` |
 | `video` | the encoder settings every episode shares, and `ffmpeg_versions`, the distinct `ffmpeg_version` of the episodes; null without RGB |
@@ -261,6 +261,11 @@ or ignore them.
 | `tools` | `tools/check_dataset.py` and `tools/check_criteria.yaml`: `path`, `sha256`, `bytes` |
 | `conventions` | units, world frame, quaternion order, frame steps, the trajectory's rows, the video clock, camera model and axes, images, depth, stress, the deformation gradient's reference configuration, and `segmentation_classes` (null without segmentation) |
 | `provenance` | `generation` and `export`: the distinct provenance records the episodes carry |
+
+`metadata.yaml` holds these keys and no others: at the top, in `counts`, in a type's entry and in
+an entry of `files` (`n_frames` for a frames file or a video, `n_steps` for a trajectory) or
+`tools`. The check counts every other key as a mismatch, as nothing compares what it states with
+the files.
 
 `SHA256SUMS` lists every entry of `files` and `tools` as `<sha256>  <path>`, in path order, as
 `sha256sum -c` reads it. The check reads `metadata.yaml` and the criteria file only when neither
@@ -371,7 +376,7 @@ files, are ignored and listed in the report.
 | Item | Passes when | Published values |
 |---|---|---|
 | scale | no data file breaks a rule, and the frames of the episodes whose files are all clean reach the minimum | `min_frames` 1,000,000 |
-| metadata | nothing `metadata.yaml` states disagrees with the files: counts, object types, channels, conventions, each episode's shared values, each file's kind, size, count, identity and sha256, the tools and `SHA256SUMS`. And the specification holds: the required channels and cameras in every episode, the licence, a DOI and an `https://` download URL | `max_mismatches` 0; the six channels, `front` and `wrist`, `CC-BY-4.0` |
+| metadata | nothing `metadata.yaml` states disagrees with the files: counts, object types, channels, conventions, each episode's shared values, each file's kind, size, count, identity and sha256, the tools and `SHA256SUMS`; it holds no key the format does not define, and `created` is a time in UTC. And the specification holds: the required channels and cameras in every episode, the licence, a DOI and an `https://` download URL | `max_mismatches` 0; the six channels, `front` and `wrist`, `CC-BY-4.0` |
 | consistency | every frame's layers carry the frame's own step and its videos hold it at its index (the step part), and on a sample drawn with the seed from the frames whose contacts press on the robot, those contact points projected through each camera land within a tolerance of the object's mask (the projection) | `min_pass_fraction` 1.0 for both parts, of the layers `rgb`, `depth`, `force`, `stress`; a sample of 1,000 from at least 1,000 such frames; 4 px |
 | diversity | the object types of the episodes whose files are all clean, those scale counts, reach the minimum, and no frames file is unread or untyped, no two types are one in lower case, no asset or episode is under two types, and every episode's `facts` hold the required kinds. The types of every frames file read are counted beside them, and a table per variable of the facts, the types and the labels of the files read is reported | `min_object_types` 10; `material`, `placement`, `lighting`, `camera` |
 
@@ -407,7 +412,7 @@ items run: scale, metadata, consistency (not run: diversity)
 
 Item                  Measured                                                             Criterion                      Result
 scale                 10 frames in 4 episodes (16 files)                                   >= 10 frames                   PASS
-metadata              0 mismatches in 184 comparisons                                      <= 0 mismatches, and spec      FAIL
+metadata              0 mismatches in 185 comparisons                                      <= 0 mismatches, and spec      FAIL
   spec (in metadata)  6 of 6 GT channels, cameras front, wrist; failed: doi, download_url  6 channels, front, wrist, ...  FAIL
 consistency           steps 10/10 frames (100.00 %), sample 5/5; projection 5/5 of ...     100 % of frames; ...           PASS
 

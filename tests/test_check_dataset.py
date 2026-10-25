@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -299,14 +300,14 @@ def only_pyarrow_numpy_yaml(tmp_path):
 
 
 def worked_count(n_types, n_episodes, n_files, rgb, checksums):
-    """The metadata item's comparisons on a clean dataset: format and version, five
-    counts, channels and their count, conventions, three per type, eleven per frames
-    file, the ffmpeg builds with rgb, provenance, per listed file six (five without
-    sha256), per tool two (one), and SHA256SUMS: its paths, then each path."""
+    """The metadata item's comparisons on a clean dataset: format, version and created,
+    five counts, channels and their count, conventions, three per type, eleven per
+    frames file, the ffmpeg builds with rgb, provenance, per listed file six (five
+    without sha256), per tool two (one), and SHA256SUMS: its paths, then each path."""
     per_file, per_tool = (6, 2) if checksums else (5, 1)
     sums = 1 + n_files + 2
     return (
-        2
+        3
         + 8
         + 3 * n_types
         + 11 * n_episodes
@@ -2238,6 +2239,47 @@ METADATA = [
         ["tools: tools/extra.py is not a tool of the format", "SHA256SUMS: paths"],
     ),
     (lambda m: m["tools"][1].update(bytes=0), [f"{CRITERIA}: bytes"]),
+    # A key the format does not define states what nothing compares.
+    (
+        lambda m: m.update(colour="red"),
+        ["metadata.yaml: key 'colour' is not in the format"],
+    ),
+    # Keys of any YAML type, in the file's order.
+    (
+        lambda m: m.update({1: "one", "check": {"pass": True}}),
+        [
+            "metadata.yaml: key 1 is not in the format",
+            "metadata.yaml: key 'check' is not in the format",
+        ],
+    ),
+    (
+        lambda m: m["counts"].update(n_videos=8),
+        ["counts: key 'n_videos' is not in the format"],
+    ),
+    (
+        lambda m: m["object_types"]["apple"].update(colour="red"),
+        ["object_types.apple: key 'colour' is not in the format"],
+    ),
+    (
+        lambda m: entry(APPLE)(m).update(n_steps=6),
+        [f"{APPLE}: key 'n_steps' is not in the format"],
+    ),
+    (
+        lambda m: entry(APPLE_TRAJECTORY)(m).update(n_frames=3),
+        [f"{APPLE_TRAJECTORY}: key 'n_frames' is not in the format"],
+    ),
+    (
+        lambda m: entry(APPLE_FRONT)(m).update(codec="av1"),
+        [f"{APPLE_FRONT}: key 'codec' is not in the format"],
+    ),
+    (
+        lambda m: m["tools"][0].update(version="1.0"),
+        ["tools/check_dataset.py: key 'version' is not in the format"],
+    ),
+    (
+        lambda m: m.pop("created"),
+        ["created is not a time in UTC, YYYY-MM-DDTHH:MM:SSZ"],
+    ),
 ]
 
 
@@ -2249,6 +2291,46 @@ def test_each_disagreement_with_metadata_yaml_is_one_mismatch(root, change, foun
     report = check(root)
     assert mismatches(report) == found
     assert not report["items"]["metadata"]["pass"]
+
+
+def test_finalize_writes_only_the_keys_the_check_defines(root):
+    metadata = read_meta(root)
+    assert sorted(metadata) == sorted(fmt.METADATA_KEYS)
+    assert sorted(metadata["counts"]) == sorted(fmt.COUNT_KEYS)
+    for row in metadata["object_types"].values():
+        assert sorted(row) == sorted(fmt.OBJECT_TYPE_KEYS)
+    assert {e["kind"] for e in metadata["files"]} == set(fmt.FILE_KINDS)
+    for listed in metadata["files"]:
+        assert sorted(listed) == sorted(fmt.FILE_ENTRY_KEYS[listed["kind"]])
+    for tool in metadata["tools"]:
+        assert sorted(tool) == sorted(fmt.TOOL_ENTRY_KEYS)
+
+
+@pytest.mark.parametrize(
+    ("created", "ok"),
+    [
+        ("2026-10-25T06:07:08Z", True),
+        ("2028-02-29T23:59:59Z", True),
+        ("2026-02-29T00:00:00Z", False),
+        ("2026-10-25T24:00:00Z", False),
+        ("2026-10-25T23:59:60Z", False),
+        ("2026-1-5T6:7:8Z", False),
+        ("2026-10-25T06:07:08", False),
+        ("2026-10-25T06:07:08+00:00", False),
+        ("2026-10-25 06:07:08Z", False),
+        ("٢٠٢٦-10-25T06:07:08Z", False),
+        # A YAML timestamp, not the string finalize writes.
+        (datetime(2026, 10, 25, 6, 7, 8, tzinfo=timezone.utc), False),
+        (None, False),
+    ],
+)
+def test_created_is_a_time_in_utc_to_the_second(root, created, ok):
+    metadata = read_meta(root)
+    metadata["created"] = created
+    write_meta(root, metadata)
+    assert mismatches(check(root, items=("metadata",))) == (
+        [] if ok else ["created is not a time in UTC, YYYY-MM-DDTHH:MM:SSZ"]
+    )
 
 
 def test_mismatches_come_in_one_order(root):
