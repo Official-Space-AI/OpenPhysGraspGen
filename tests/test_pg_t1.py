@@ -1391,6 +1391,124 @@ def test_the_10_cm_centroid_bound_is_inclusive():
         assert score(rows, task)["placed_task"]["verdict"] is verdict
 
 
+def measured(name, times=1.0):
+    """The tolerance a put-down meets exactly: its fact name, times times."""
+    return lambda facts, _: times * facts[name]
+
+
+def centroid_at(rows, i):
+    return rows[i]["object.centroid"]
+
+
+def with_the_tool(rows, first, last):
+    """The rows with the object's centroid at the tool's height on rows first to last."""
+    out = [dict(r) for r in rows]
+    for r in out[first : last + 1]:
+        r["object.centroid"] = (*r["object.centroid"][:2], r["robot.ee_pose"][2])
+    return out
+
+
+# Each tolerance of the two placements is met at the value the episode measures and
+# missed at the float under it.
+@pytest.mark.parametrize(
+    ("rows", "task", "key", "edge", "word"),
+    [
+        (
+            put_down(slip=lambda i: 0.030 * clamp((i - 300) / 120)),
+            CARRY,
+            "carry_slip_tol_m",
+            measured("carry_slip_max_m"),
+            "slipped_in_jaws",
+        ),
+        (
+            put_down(path=dragged(0.003)),
+            CARRY,
+            "place_tol_m",
+            measured("dragged_max_m"),
+            "dragged",
+        ),
+        (
+            put_down(clearance=0.018, slip=lambda i: 0.015 * clamp((i - 400) / 3)),
+            CARRY,
+            "place_release_drop_tol_m",
+            measured("came_down_excess_max_m"),
+            "came_down_fast",
+        ),
+        (
+            put_down(clearance=0.0, path=set_down_fast),
+            CARRY,
+            "set_down_speed_max_m_s",
+            measured("set_down_speed_m_s"),
+            "set_down_too_fast",
+        ),
+        (
+            put_down(clearance=0.015, fall=lambda k: min(0.015, 0.0025 * k)),
+            CARRY,
+            "place_release_drop_tol_m",
+            measured("fall_after_open_m"),
+            "fell_on_release",
+        ),
+        # The push bound is half of place_tol_m.
+        (
+            put_down(shove=pushed(0.011)),
+            CARRY,
+            "place_tol_m",
+            measured("push_after_release_m", 2.0),
+            "pushed_after_release",
+        ),
+        (
+            put_down(wander=nudged(690)),
+            CARRY,
+            "place_rest_radius_m",
+            measured("rest_wander_m"),
+            "not_at_rest",
+        ),
+        # The put-back opens at row 390 and ends at row 449; the object rested at row 0.
+        (
+            put_back(fall=0.02),
+            "lift_hold_place",
+            "place_release_drop_tol_m",
+            lambda _, rows: centroid_at(rows, 390)[2] - centroid_at(rows, 449)[2],
+            "fell_on_release",
+        ),
+        (
+            moved_at(put_back(), 440, (0.003, 0.0, 0.0)),
+            "lift_hold_place",
+            "place_rest_radius_m",
+            lambda _, rows: math.dist(centroid_at(rows, 440), centroid_at(rows, 449)),
+            "not_at_rest",
+        ),
+        (
+            put_back(drift=0.03),
+            "lift_hold_place",
+            "place_tol_m",
+            lambda _, rows: math.dist(centroid_at(rows, 449), centroid_at(rows, 0)),
+            "not_back_at_start",
+        ),
+        # Held at the tool point from the end of the hold to the opening, the object
+        # comes down exactly as fast as the tool.
+        (
+            with_the_tool(put_back(), 354, 390),
+            "lift_hold_place",
+            "place_max_descent_factor",
+            lambda *_: 1.0,
+            "descent_not_with_tool",
+        ),
+    ],
+)
+def test_each_placement_tolerance_is_inclusive(rows, task, key, edge, word):
+    schedule = SCHEDULES[task]
+    facts = score(rows, block(task, schedule))["placed_task"]["facts"]
+    value = edge(facts, rows)
+    for tolerance, verdict, reasons in (
+        (value, True, []),
+        (math.nextafter(value, 0.0), False, [word]),
+    ):
+        task_block = block(task, schedule, judge={key: tolerance})
+        placed = score(rows, task_block)["placed_task"]
+        assert (placed["verdict"], placed["reasons"]) == (verdict, reasons)
+
+
 def test_a_hold_the_recording_cuts_short_leaves_the_put_down_unjudged():
     # No drop stop: the internal hold from the crossing at row 259 needs rows to 499.
     record = score(put_down(truncate=400), block(CARRY, CP))
