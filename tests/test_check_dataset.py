@@ -1945,7 +1945,8 @@ def test_a_video_is_held_to_its_episode_whatever_else_its_footer_breaks(
 @needs_av1
 def test_a_dataset_written_with_svt_av1_passes(tmp_path):
     root = tmp_path / "dataset"
-    # 64 x 96 pixels: the SVT-AV1 1.7 of Ubuntu 24.04 refuses a frame under 64 x 64.
+    # 64 x 96 pixels: SVT-AV1 1.7 and 2.3, the versions Ubuntu 24.04 and 26.04 ship,
+    # refuse a frame under 64 x 64.
     build_dataset(root, ffmpeg=shutil.which("ffmpeg"), episodes=EPISODES[:3], scale=4)
     criteria = criteria_text(**{**SMALL, "min_frames": 8, "min_object_types": 2})
     (root / CRITERIA).write_text(criteria)
