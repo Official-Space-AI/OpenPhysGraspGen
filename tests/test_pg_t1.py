@@ -1871,11 +1871,21 @@ def test_the_task_score_is_taken_over_the_decidable_episodes(tmp_path):
     c, b = table["C"], table["B"]
     assert (b["lifted"]["of_all"], b["held"]["undecidable"]) == (1.0, 1)
     assert b["task_score"] == c["task_score"] == 1.0
+    assert (b["task_score_n"], c["task_score_n"]) == (1, 2)
+    lines = printed(report)
     # B's held: 1 of 1 attempted and 1 of the 1 decidable episode; C's: 2 of 2.
-    assert "held 1/1 1.000 [0.207, 1.000] 1/1 1.000 [0.207, 1.000]" in printed(report)
+    assert "held 1/1 1.000 [0.207, 1.000] 1/1 1.000 [0.207, 1.000]" in lines
+    # B's lifted row counts both episodes, its score only the decidable one.
+    assert "lifted 2/2 1.000 [0.342, 1.000] 2/2 1.000 [0.342, 1.000]" in lines
+    assert "task score 1.000 over 1 decidable" in lines
+    assert "task score 1.000 over 2 decidable" in lines
     write(tmp_path / "short", [shorter])
     b = scored(tmp_path / "short")[0]["tasks"]["lift_hold_place"]["overall"]["B"]
-    assert (b["task_score"], b["task_score_why_null"]) == (None, "no decidable episode")
+    assert (b["task_score"], b["task_score_n"], b["task_score_why_null"]) == (
+        None,
+        0,
+        "no decidable episode",
+    )
     assert b["headline"] is None
 
 
@@ -1895,11 +1905,12 @@ def test_a_task_without_a_hold_reports_lifted_alone(tmp_path):
     assert "held" not in records["ep-0"]["C"] and "placed" not in records["ep-0"]["B"]
     for x in ("C", "B"):
         cells = report["tasks"]["pick"]["overall"][x]
-        assert (cells["held"], cells["placed"], cells["task_score"]) == (
-            None,
-            None,
-            None,
-        )
+        assert (
+            cells["held"],
+            cells["placed"],
+            cells["task_score"],
+            cells["task_score_n"],
+        ) == (None, None, None, None)
         assert cells["task_score_why_null"] == "no put-down planned"
         assert (cells["headline"]["stage"], cells["headline"]["of_all"]) == (
             "lifted",

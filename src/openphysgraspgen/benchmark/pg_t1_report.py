@@ -91,13 +91,18 @@ def _cells(
         s: _stage(records, criterion, s) if s in stages else None for s in STAGES
     }
     pop = [r for r in records if _is_decidable(r, criterion)]
-    if len(stages) < len(STAGES):
-        cells["task_score"], cells["task_score_why_null"] = None, "no put-down planned"
+    planned = len(stages) == len(STAGES)
+    if not planned:
+        score, why = None, "no put-down planned"
     elif not pop:
-        cells["task_score"], cells["task_score_why_null"] = None, "no decidable episode"
+        score, why = None, "no decidable episode"
     else:
         rates = [sum(r[criterion][s] is True for r in pop) / len(pop) for s in STAGES]
-        cells["task_score"], cells["task_score_why_null"] = sum(rates) / 3, None
+        score, why = sum(rates) / 3, None
+    cells["task_score"] = score
+    # The lifted row counts every episode, the score only the decidable ones.
+    cells["task_score_n"] = len(pop) if planned else None
+    cells["task_score_why_null"] = why
     last = cells[stages[-1]]
     cells["headline"] = (
         None
@@ -464,7 +469,7 @@ def _task_text(
             + (
                 _WHY_NULL[cells["task_score_why_null"]]
                 if score is None
-                else f"{score:.3f}"
+                else f"{score:.3f} over {cells['task_score_n']} decidable"
             )
         )
         top = cells["headline"]

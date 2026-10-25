@@ -327,10 +327,12 @@ whose window is decidable):
 - `of_all` is true over all of them: the unconditional rate.
 - Each comes with its Wilson 95 % interval, z = 1.959963984540054.
 - The task score is the mean of the three `of_all` rates over the episodes with a decidable window.
-  Rates over all are used because their mean moves with every stage: with conditional rates, a
-  grasp that lifts 10 of 100 objects and holds and places all 10 would score 0.70 instead of 0.10.
-  It is null with its reason for a task that places nothing or has no episode with a decidable
-  window, and it carries no interval: it is not a proportion.
+  `task_score_n` counts those episodes, and the table prints it after the score ("0.694 over 12
+  decidable"), since the `lifted` row counts every episode. Rates over all are used because their
+  mean moves with every stage: with conditional rates, a grasp that lifts 10 of 100 objects and
+  holds and places all 10 would score 0.70 instead of 0.10. It is null with its reason for a task
+  that places nothing or has no episode with a decidable window, and it carries no interval: it is
+  not a proportion. For a task that places nothing, `task_score_n` is null too.
 - The headline is the last planned stage over all with its interval: `placed`, the fraction of
   episodes lifted, held and placed, for a task that places, else `held`, else `lifted`.
 - The failure breakdown counts each class and each class's words; an episode with several words
@@ -354,11 +356,11 @@ rule (`refused`) and why (`detail`), `unlisted`, `unlisted_paths`), `tasks`, `fl
 and `status`. Under `tasks`, each task has its `criterion_id`, `placed_rule` (`put-back`, `put-down`
 or null), `n_object_types`, `population`, `overall` and `by_object_type`; each table holds `n` and,
 for C and B, the three stages (`planned`, `undecidable`, `true`, `false`, `not_reached`,
-`of_attempted`, `of_all` and the two intervals), `task_score`, `task_score_why_null`, `headline` and
-`failures` (`counts`, `of_all`, `reasons`). Each line of the episodes file is one episode, ordered
-by object type, then episode uid: its verdicts, class and words per criterion, C's agreement record,
-B's crossing and window end, the placement verdict with its facts, and its check, or for a refused
-episode its rule and why.
+`of_attempted`, `of_all` and the two intervals), `task_score`, `task_score_n`,
+`task_score_why_null`, `headline` and `failures` (`counts`, `of_all`, `reasons`). Each line of the
+episodes file is one episode, ordered by object type, then episode uid: its verdicts, class and
+words per criterion, C's agreement record, B's crossing and window end, the placement verdict with
+its facts, and its check, or for a refused episode its rule and why.
 
 The output is deterministic: no randomness, episodes ordered by object type, then episode uid, and
 numbers written as the shortest float64 strings that read back exactly.
