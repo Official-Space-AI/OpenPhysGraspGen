@@ -1560,6 +1560,70 @@ def test_finalize_refuses_what_the_format_does_not_describe(tmp_path, damage, me
     assert not (tmp_path / "SHA256SUMS").exists()
 
 
+def _link_elsewhere(root, rel):
+    """Move rel out of the root, and leave a symbolic link to it in its place."""
+    moved = root.parent / "elsewhere" / rel
+    moved.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(root / rel, moved)
+    (root / rel).symlink_to(moved, target_is_directory=moved.is_dir())
+
+
+def _link_folder(root, rel):
+    """A symbolic link at rel to a folder outside the root that holds a file."""
+    folder = root.parent / "linked"
+    folder.mkdir()
+    (folder / "notes.txt").write_text("")
+    (root / rel).symlink_to(folder, target_is_directory=True)
+
+
+@POSIX
+@pytest.mark.parametrize(
+    ("link", "rel"),
+    [
+        # A type's folder on another disk, as an export might put it.
+        (lambda root: _link_elsewhere(root, "data/banana"), "data/banana"),
+        (lambda root: _link_elsewhere(root, "trajectories"), "trajectories"),
+        (
+            lambda root: _link_elsewhere(root, "data/apple/ep-0.parquet"),
+            "data/apple/ep-0.parquet",
+        ),
+        (
+            lambda root: (root / "data/apple/ep-9.parquet").symlink_to(root / "none"),
+            "data/apple/ep-9.parquet",
+        ),
+        # A folder that os.walk does not enter, and one that finalize writes into.
+        (lambda root: _link_folder(root, "notes"), "notes"),
+        (lambda root: _link_folder(root, "tools"), "tools"),
+        (lambda root: _link_elsewhere(root, "README.md"), "README.md"),
+    ],
+)
+def test_finalize_refuses_a_symbolic_link_under_the_root(tmp_path, link, rel):
+    root = tmp_path / "root"
+    recorder = GraspDataRecorder(root, make_spec())
+    write_episode(recorder, uid="ep-0", object_type="apple")
+    write_episode(recorder, uid="ep-1", object_type="banana", n_frames=3)
+    (root / "README.md").write_text(card_front_matter() + "\n# unit-test\n")
+    link(root)
+    with pytest.raises(
+        DatasetError,
+        match=f"^cannot finalize the dataset:\n  {re.escape(rel)} is a symbolic link$",
+    ):
+        recorder.finalize()
+    # Nothing is written, through a link either.
+    for name in (*finalize_module.WRITTEN, *fmt.TOOL_FILES):
+        assert not (root / name).exists(), name
+
+
+@POSIX
+def test_finalize_follows_no_link_in_the_folders_it_skips(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    write_episode(recorder)
+    for name in finalize_module.SKIPPED_DIRS:
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "link").symlink_to(tmp_path / "none")
+    assert recorder.finalize()["counts"]["n_files"] == 2
+
+
 def test_finalize_replaces_the_part_files_of_a_finalize_that_was_stopped(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     write_episode(recorder)

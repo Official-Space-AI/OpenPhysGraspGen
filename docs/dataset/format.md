@@ -280,6 +280,8 @@ video's index. Then it hashes each file. It refuses the dataset when:
 
 - the root holds no episode, or a file the layout does not define (an interrupted episode leaves
   `.part` files), or `tools/` holds a file other than the two tool files;
+- a file or folder under the root is a symbolic link: an upload publishes a link as the link or as
+  what it names, which may lie outside the root, so finalize follows none;
 - a file breaks a rule of the check: an episode's metadata (its keys, their values, the identity
   of its path), a file's columns (names, order, types, nullability, field metadata), a value of a
   frame or of a trajectory step, a video's index or its sha256, a file of an episode that is
