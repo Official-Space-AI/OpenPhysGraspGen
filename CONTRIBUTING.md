@@ -58,7 +58,7 @@ release notes.
   3.10–3.14, dependency review, CodeQL) and one approving review from a maintainer
   other than the author (see [GOVERNANCE.md](GOVERNANCE.md)). Branch protection on
   `main` enforces both.
-- Maintainers aim to give a first response within **2 business days** (KST).
+- Maintainers aim to give a first response within **48 hours**.
   This is a goal, not a guarantee.
 - Reviewers focus on correctness, tests, physical units and numerical edge cases,
   and public API changes. Style is left to `ruff`.
@@ -75,8 +75,13 @@ for licenses in the allowed class listed in
 dependency under any other license is added there as an exception once its
 evaluation is approved.
 
-## License
+## License and sign-off
 
 By submitting a pull request you agree that your contribution is licensed under
-the [Apache License 2.0](LICENSE) (section 5, "Submission of Contributions"), and
-that you have the right to submit it.
+the [Apache License 2.0](LICENSE) (section 5, "Submission of Contributions").
+
+Sign off every commit with `git commit -s`. The `Signed-off-by` line certifies the
+[Developer Certificate of Origin 1.1](https://developercertificate.org/): that you
+wrote the change or otherwise have the right to submit it under the project's
+license. Pull requests from outside contributors are merged only when every
+commit is signed off.

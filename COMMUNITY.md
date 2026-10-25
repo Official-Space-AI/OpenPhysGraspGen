@@ -23,7 +23,7 @@ vulnerabilities in any public channel.
 ## Response expectations
 
 - Hours: weekdays 09:00–18:00, Asia/Seoul (KST)
-- First triage of new issues and discussions: within **2 business days**
+- First triage of new issues and discussions: within **48 hours**
 - Answers in community channels are best effort and are not a support contract.
 
 ## Triage

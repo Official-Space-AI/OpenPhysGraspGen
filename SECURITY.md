@@ -26,7 +26,7 @@ Include:
 
 | Step | Target |
 |---|---|
-| Acknowledge the report | 3 business days |
+| Acknowledge the report | 48 hours |
 | Initial assessment and severity | 7 business days |
 | Fix or mitigation plan shared with the reporter | 30 days |
 
