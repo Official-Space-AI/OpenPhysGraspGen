@@ -35,3 +35,22 @@ jobs:
       - run: pytest --cov=openphysgraspgen --cov-report=term-missing
       - name: CLI smoke test
         run: openphysgraspgen > /dev/null
+
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install build==1.6.1
+      - run: python -m build
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-env"
+          "$RUNNER_TEMP/wheel-env/bin/pip" install dist/*.whl pytest
+      - name: Run the tests and the CLI against the installed wheel
+        run: |
+          "$RUNNER_TEMP/wheel-env/bin/python" -c "import openphysgraspgen; assert 'site-packages' in openphysgraspgen.__file__, openphysgraspgen.__file__"
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pytest -p no:cacheprovider tests
+          "$RUNNER_TEMP/wheel-env/bin/openphysgraspgen" > /dev/null
