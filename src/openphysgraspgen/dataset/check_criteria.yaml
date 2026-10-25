@@ -37,10 +37,11 @@ consistency:
   distance_reach_px: 16.0
 
 diversity:
-  # Object types (each episode's object_type), and a table per variable of the episodes'
-  # facts, which must carry every kind in required_fact_kinds. Numbers go into bins bins,
-  # log-spaced when the largest is at least log_bins_min_ratio times the smallest; other
-  # values into rows for their max_categories most frequent.
+  # Object types (each episode's object_type) of the episodes whose files are all clean,
+  # and a table per variable of the episodes' facts, which must carry every kind in
+  # required_fact_kinds. Numbers go into bins bins, log-spaced when the largest is at
+  # least log_bins_min_ratio times the smallest; other values into rows for their
+  # max_categories most frequent.
   min_object_types: 10
   required_fact_kinds: [material, placement, lighting, camera]
   bins: 8

@@ -3834,9 +3834,11 @@ def check_diversity(ds: Dataset, criteria: Mapping[str, Any]) -> dict[str, Any]:
     """The object types, and a distribution table per variable of the episodes' facts.
 
     A type is a frames file's footer object_type, which must be the type of its path.
-    The item fails when a frames file was not read, has no valid type, when two types
-    are one after lower-casing, one asset is under two types, one episode is in two
-    files, or a file's facts lack a required kind.
+    The minimum counts the types of the episodes whose files are all clean, as scale
+    counts their frames; the types of every frames file read are reported beside them,
+    and the tables are of every frames file read. The item fails when a frames file was
+    not read, has no valid type, when two types are one after lower-casing, one asset is
+    under two types, one episode is in two files, or a file's facts lack a required kind.
     """
     minimum = criteria["min_object_types"]
     kinds = list(criteria["required_fact_kinds"])
@@ -3852,6 +3854,8 @@ def check_diversity(ds: Dataset, criteria: Mapping[str, Any]) -> dict[str, Any]:
 
     typed = [rec for rec in read if label(rec) is not None]
     without_type = [rec.rel for rec in read if label(rec) is None]
+    clean_episodes = {e.frames.rel for e in ds.episodes.values() if not e.has_errors}
+    counted = {label(rec) for rec in typed if rec.rel in clean_episodes}
     spellings: dict[str, set[str]] = {}
     assets: dict[str, set[str]] = {}
     episodes: dict[str, list[str]] = {}
@@ -3936,8 +3940,9 @@ def check_diversity(ds: Dataset, criteria: Mapping[str, Any]) -> dict[str, Any]:
         or missing_facts
     )
     return {
-        "pass": clean and len(object_types) >= minimum,
-        "n_object_types": len(object_types),
+        "pass": clean and len(counted) >= minimum,
+        "n_object_types": len(counted),
+        "n_object_types_read": len(object_types),
         "object_types": object_types,
         "criterion": {"min_object_types": minimum, "required_fact_kinds": kinds},
         "files_not_read": not_read,
@@ -4159,8 +4164,11 @@ def _measured(item: str, r: Mapping[str, Any]) -> tuple[str, str]:
         )
         if r[key]
     )
+    types = f"{r['n_object_types']} object types"
+    if r["n_object_types_read"] != r["n_object_types"]:
+        types += f" in clean episodes ({r['n_object_types_read']} in the files read)"
     return (
-        f"{r['n_object_types']} object types, {len(r['tables'])} variable tables"
+        f"{types}, {len(r['tables'])} variable tables"
         + (f"; {problems} kind(s) of problem below" if problems else ""),
         (
             f">= {r['criterion']['min_object_types']} object types; facts "

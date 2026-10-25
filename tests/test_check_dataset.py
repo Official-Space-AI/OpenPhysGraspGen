@@ -357,7 +357,8 @@ def test_a_complete_dataset_passes_every_item(root):
         # Every point lies on the object's near face, which the depth image shows.
         assert stats["depth_residual_m"]["max"] == 0.0
     diversity = items["diversity"]
-    assert diversity["n_object_types"] == N_TYPES
+    assert diversity["n_object_types"] == diversity["n_object_types_read"] == N_TYPES
+    assert f"  {N_TYPES} object types, " in fmt.format_table(report)
     assert diversity["labels"] == {
         "success": {"n_episodes": 4, "n_frames": 10, "frame_fraction": 1.0}
     }
@@ -2945,7 +2946,9 @@ def diversity(records, **criteria):
         "max_categories": 2,
         **criteria,
     }
-    ds = fmt.Dataset(Path("."), records, {}, {}, {}, [], {}, [], True)
+    # Each record is an episode of its own, clean unless it holds an error.
+    episodes = {rec.rel: fmt.Episode(rec) for rec in records}
+    ds = fmt.Dataset(Path("."), records, episodes, {}, {}, [], {}, [], True)
     return fmt.check_diversity(ds, values)
 
 
@@ -2958,6 +2961,11 @@ def test_diversity_counts_object_types_against_its_minimum():
         "n_frames": 3,
         "frame_fraction": 0.1,
     }
+    # A type whose only episode breaks a rule counts no more: scale leaves it out.
+    records[0].errors.append("a finding of the episode")
+    result = diversity(records, min_object_types=10)
+    assert (result["n_object_types"], result["n_object_types_read"]) == (9, 10)
+    assert not result["pass"]
 
 
 def test_diversity_finds_types_assets_and_episodes_that_are_one():
@@ -3138,6 +3146,21 @@ def test_diversity_reports_files_not_read(root):
     result = check(root)["items"]["diversity"]
     assert result["files_not_read"] == [APPLE]
     assert not result["pass"]
+
+
+def test_diversity_counts_the_types_of_episodes_whose_files_are_all_clean(root):
+    # banana's one episode has a damaged video, which scale leaves out; its frames file
+    # is still read, and its type is in the tables.
+    flip(root / "videos/wrist/banana/ep-2.mp4")
+    report = check(root)
+    result = report["items"]["diversity"]
+    assert (result["n_object_types"], result["n_object_types_read"]) == (2, 3)
+    assert list(result["object_types"]) == ["apple", "banana", "cherry"]
+    assert result["files_not_read"] == []
+    assert not result["pass"]
+    assert "  2 object types in clean episodes (3 in the files read), " in (
+        fmt.format_table(report)
+    )
 
 
 def test_diversity_walks_facts_of_any_depth():
