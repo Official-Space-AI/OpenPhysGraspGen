@@ -1237,8 +1237,14 @@ def without_tool_at(rows, at):
         (put_back(drop=True), False, ["descent_not_with_tool"], None),
         (moved_at(put_back(), 440, (0.003, 0.0, 0.0)), False, ["not_at_rest"], None),
         (moved_at(put_back(), 439, (0.003, 0.0, 0.0)), True, [], None),
-        (widened(put_back(), 370, 370, 0.05 + 2e-6), False, ["fell_on_release"], None),
-        (widened(put_back(), 370, 370, 0.05 + 0.5e-6), True, [], None),
+        # The jaws hold 0.05 m wide: a width exactly 1 um wider is no release.
+        (
+            widened(put_back(), 370, 370, math.nextafter(0.05 + 1e-6, 1.0)),
+            False,
+            ["fell_on_release"],
+            None,
+        ),
+        (widened(put_back(), 370, 370, 0.05 + 1e-6), True, [], None),
         (widened(put_back(), 356, 389, 0.12), None, [], "too_few_carried_rows"),
         (
             widened(put_back(), 357, 389, 0.12),
@@ -1304,6 +1310,14 @@ def pressed(rows, at, force):
     ]
 
 
+def bottom_at(rows, at, z):
+    """The rows with the object's lowest point at height z on row at."""
+    return [
+        dict(r, **{"object.bbox_min": (*r["object.bbox_min"][:2], z)}) if i == at else r
+        for i, r in enumerate(rows)
+    ]
+
+
 @pytest.mark.parametrize(
     ("rows", "verdict", "reasons", "fact", "value"),
     [
@@ -1337,6 +1351,16 @@ def pressed(rows, at, force):
         # The force peak is read up to the row the jaws are fully open, 630.
         (pressed(put_down(), 630, 5.0), True, [], "set_down_bench_force_peak_n", 5.0),
         (pressed(put_down(), 631, 5.0), True, [], "set_down_bench_force_peak_n", 0.0),
+        # Let go 3 mm up, the object first comes within 1 mm of its rest height
+        # underneath, 0.0, on row 603, or on row 602 when that row is exactly 1 mm up.
+        (bottom_at(put_down(), 602, 0.001), True, [], "first_touch_frame", 602),
+        (
+            bottom_at(put_down(), 602, math.nextafter(0.001, 1.0)),
+            True,
+            [],
+            "first_touch_frame",
+            603,
+        ),
     ],
 )
 def test_each_put_down_bound(rows, verdict, reasons, fact, value):
@@ -1350,13 +1374,24 @@ def test_each_put_down_bound(rows, verdict, reasons, fact, value):
 
 
 @pytest.mark.parametrize(
-    ("dx", "dy"), [(0.047, 0), (-0.047, 0), (0, 0.047), (0, -0.047)]
+    ("dx", "dy", "verdict", "reasons"),
+    [
+        (0, 0, True, []),
+        (1e-9, 0, False, ["off_target"]),
+        (-1e-9, 0, False, ["off_target"]),
+        (0, 1e-9, False, ["off_target"]),
+        (0, -1e-9, False, ["off_target"]),
+    ],
 )
-def test_the_object_must_end_on_the_mat_on_every_side(dx, dy):
-    # The object ends 8 cm wide around (0.5, 0.15); the mat is 0.154 m wide.
-    target = dict(TARGET, x_m=TARGET["x_m"] + dx, y_m=TARGET["y_m"] + dy)
+def test_the_object_must_end_on_the_mat_on_every_side(dx, dy, verdict, reasons):
+    # The object ends 8 cm wide around (0.5, 0.15), and the mat is as wide: its bounds,
+    # the centroid +/- 0.04, lie on the edges, the mat's centre +/- 0.04. A mat moved a
+    # nanometre leaves the object off it on one side.
+    target = dict(
+        TARGET, x_m=TARGET["x_m"] + dx, y_m=TARGET["y_m"] + dy, half_extent_m=0.04
+    )
     placed = score(put_down(), block(CARRY, CP, place_target=target))["placed_task"]
-    assert (placed["verdict"], placed["reasons"]) == (False, ["off_target"])
+    assert (placed["verdict"], placed["reasons"]) == (verdict, reasons)
 
 
 @pytest.mark.parametrize(
