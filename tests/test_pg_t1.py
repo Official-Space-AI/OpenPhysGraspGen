@@ -1103,9 +1103,11 @@ def test_a_skipped_lift_leaves_an_episode_without_a_rise_undecided():
     ]
 
 
-def test_an_episode_with_no_usable_row_is_undecided_where_b_cannot_decide():
+@pytest.mark.parametrize("stop", [None, "dropped", "never_lifted"])
+def test_an_episode_with_no_usable_row_is_undecided_where_b_cannot_decide(stop):
+    # Without a row that has both heights, C is not reached whatever the stop.
     rows = [dict(r, finite=False) for r in ramp("search_lift_hold_2s", S2, 0.15)]
-    record = score(rows, block("search_lift_hold_2s", S2))
+    record = score(rows, block("search_lift_hold_2s", S2, stop=stop))
     c, b = record["C"], record["B"]
     assert record["decidable"] == {"C": True, "B": False}
     assert (c["lifted"], c["class"], c["reasons"]) == (

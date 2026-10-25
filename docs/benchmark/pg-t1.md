@@ -202,9 +202,10 @@ float64 values, since a float32 round trip can move a rise by a few 1e-9 m eithe
 first row that is up, and the window is rows k to k + 120 - 1; a row without both heights is
 skipped.
 
-- No row is up: false when the generator stopped the episode as never lifted or as dropped, false
-  when the lift phase recorded every row it was scheduled for (`never_crossed`), and not reached
-  otherwise (`incomplete`).
+- No row has both heights: not reached (`incomplete`), whatever the `stop_reason`.
+- Some row has both heights but none is up: false when the generator stopped the episode as never
+  lifted or as dropped, false when the lift phase recorded every row it was scheduled for
+  (`never_crossed`), and not reached otherwise (`incomplete`).
 - A row of the window is not up: false, `dipped_in_window` when the centroid of some row of the
   window is under 5 cm, else `still_supported` (only lowest points under 5 mm). A recorded dip
   decides the window even when the window is cut short.
