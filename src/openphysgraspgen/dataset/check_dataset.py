@@ -3430,7 +3430,8 @@ def _project_file(
 ) -> list[dict[str, Any]]:
     """project_frame for a file's sampled frames, the file opened once and only the row
     groups that hold them read, frames_per_read frames at a time. What one frame raises
-    fails that frame."""
+    fails that frame, and what reading the file raises fails its frames; running out of
+    memory or file descriptors stops the run instead."""
 
     def failure(what: str, exc: Exception) -> dict[str, Any]:
         return {
@@ -3492,6 +3493,9 @@ def _project_file(
                             out[i] = failure("the frame could not be projected", exc)
                     first = last
             return [out[i] for i in frames]
+    except CheckError:
+        # failure() found the machine out of memory or file descriptors: the run stops.
+        raise
     except Exception as exc:  # noqa: BLE001, it fails the file's frames
         return [failure("the file cannot be read", exc) for _ in frames]
 

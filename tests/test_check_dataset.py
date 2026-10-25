@@ -2906,6 +2906,18 @@ def test_a_frames_file_whose_read_fails_is_unavailable(root, monkeypatch):
     assert not proj["pass"]
 
 
+def test_running_out_of_memory_in_the_projection_stops_the_run(
+    root, capsys, monkeypatch
+):
+    # No finding on the frame or its file: the run cannot go on.
+    def exhausted(*args, **kwargs):
+        raise MemoryError
+
+    monkeypatch.setattr(fmt, "project_frame", exhausted)
+    message, _ = refused(capsys, root, "--seed", SEED)
+    assert message.startswith("the check ran out of memory while reading data/")
+
+
 # --- diversity ------------------------------------------------------------------------
 
 
