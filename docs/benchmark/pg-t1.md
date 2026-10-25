@@ -128,7 +128,9 @@ anyway, it must still have its type.
 
 `judge` must hold the numbers the generator judged with, from the same sources, so that the
 scorer's put-down is the generator's. JSON has no NaN, so a fact the generator could not measure is
-written as null.
+written as null. The stored `agreement` and `place` records, and the trajectory the scorer
+recomputes them from, must be written as the generator recorded them, in float64, not read back
+from a float32 copy: E1 and E4 compare their entries exactly with the scorer's.
 
 ### Tasks
 
