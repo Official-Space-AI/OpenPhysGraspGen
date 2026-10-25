@@ -53,11 +53,35 @@ Python dependency has a new release; review it like any other change.
 `pypa/gh-action-pypi-publish` must stay at v1.14.3 or later (GHSA-5xjx-3w67-w9x9).
 
 The container's base image is pinned by digest in the `BASE_IMAGE` argument of the
-`Dockerfile` and used unmodified. When the release's image scan finds a fixable
-vulnerability, or before a release when the digest is old, replace the digest with the
-current one of `python:3.12-slim-trixie` in a pull request. The image keeps the base image's
-name and digest in its labels and in `/usr/share/doc/openphysgraspgen/NOTICE.container`,
-which also says where to get the source of its Debian packages.
+`Dockerfile` and used unmodified. The image keeps the base image's name and digest in its
+labels and in `/usr/share/doc/openphysgraspgen/NOTICE.container`, which also says where to
+get the source of its copyleft components. When the release's image scan finds a fixable
+vulnerability, or before a release when the digest is old, update the digest:
+
+1. In a pull request, replace the digest with the current one of `python:3.12-slim-trixie`.
+2. Re-check the policy for container base images on an image built from that branch:
+   - the base image is the official image, used unmodified and pinned by digest;
+   - the image SBOM completion step finds no package without a license;
+   - `NOTICE.container` still covers every component under the GPL, the LGPL, the MPL-2.0
+     or another license that requires source availability;
+   - there is no ffmpeg in the image.
+
+   ```sh
+   python -m build --wheel
+   docker build --platform linux/amd64 --tag openphysgraspgen:check .
+   docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.54.0 \
+     scan docker:openphysgraspgen:check --platform linux/amd64 -o spdx-json > image.spdx.json
+   docker run --rm --platform linux/amd64 --entrypoint sh openphysgraspgen:check \
+     -c 'ls -d /usr/local/lib/python3*/site-packages/numpy.libs/*' > numpy-libs.txt
+   python3 .github/scripts/complete_image_sbom.py image.spdx.json numpy-libs.txt
+   docker run --rm --platform linux/amd64 --entrypoint cat openphysgraspgen:check \
+     /usr/share/doc/openphysgraspgen/NOTICE.container
+   docker run --rm --platform linux/amd64 --user root --entrypoint sh openphysgraspgen:check \
+     -c 'find / -xdev \( -iname "*ffmpeg*" -o -name "libavcodec*" \) -print'
+   ```
+
+3. Record the check in an issue labelled `re-evaluation`, with the old and new digests and
+   the result of each condition, and link it from the pull request before it is merged.
 
 ## One-time setup
 
