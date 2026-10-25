@@ -1789,6 +1789,36 @@ def test_read_video_checks_the_size_and_count_and_names_the_decoder(tmp_path):
 
 
 @POSIX
+def test_read_video_leaves_the_callers_input_alone(tmp_path):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(minimal_mp4(4))
+    # An ffmpeg that keeps its arguments and all it reads, then decodes black frames.
+    ffmpeg = _fake_ffmpeg(
+        tmp_path,
+        f'echo "$@" > "$0.args"; cat > "$0.input"; head -c {4 * H * W * 3} /dev/zero',
+    )
+    # The caller's standard input: a pipe that holds a line.
+    read, write = os.pipe()
+    os.write(write, b"the caller's input\n")
+    os.close(write)
+    saved = os.dup(0)
+    os.dup2(read, 0)
+    try:
+        frames = read_video(path, (H, W), ffmpeg)
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+    try:
+        left = os.read(read, 100)
+    finally:
+        os.close(read)
+    assert frames.shape == (4, H, W, 3) and not frames.any()
+    assert left == b"the caller's input\n"
+    assert (tmp_path / "ffmpeg.input").read_bytes() == b""
+    assert "-nostdin" in (tmp_path / "ffmpeg.args").read_text().split()
+
+
+@POSIX
 @pytest.mark.parametrize(
     ("listing", "message"),
     [
