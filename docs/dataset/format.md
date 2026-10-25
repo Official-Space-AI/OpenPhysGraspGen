@@ -397,6 +397,13 @@ not hashed by the dataset; the report prints its sha256 to compare with the one 
 publishes. The specification fails until the dataset is published, as finalize writes `doi` and
 `download_url` as null until they are given.
 
+A pass says that the dataset meets the criteria it was published with, which finalize's
+`criteria=` can make weaker than the test. So beside whether the criteria are the published ones,
+the report says whether they are at least as strict as the dataset test, as
+`meets_test_definition`: `min_frames` of at least 1,000,000, `max_mismatches` of 0, a
+`min_pass_fraction` of 1.0 on at least the layers `rgb`, `depth`, `force` and `stress`, and
+`min_object_types` of at least 10. It changes neither the verdict nor the exit status.
+
 ### What it prints
 
 A table, the listings of what failed (the first 50 of each; the JSON report holds them all), the
@@ -406,7 +413,7 @@ diversity tables, and a last line that a program reads:
 physgraspgen-public 2.0 dataset check
 root: /data/physgraspgen-dataset
 metadata.yaml: sha256 8ed4b2834fb12ee20394237981321dded26c02b3c05df04276403835cb553879
-criteria: /data/physgraspgen-dataset/tools/check_criteria.yaml (sha256 693e6253e768b0c8; the published one: yes)
+criteria: /data/physgraspgen-dataset/tools/check_criteria.yaml (sha256 693e6253e768b0c8; the published one: yes; at least as strict as the test: NO)
 script: /data/physgraspgen-dataset/tools/check_dataset.py (sha256 c66e0e133da35f5b; the published one: yes)
 items run: scale, metadata, consistency (not run: diversity)
 
@@ -421,11 +428,12 @@ RESULT {"pass": false, "complete": false, "items_run": ["scale", "metadata", "co
 ```
 
 The `RESULT` line holds the verdict, `complete` (whether all four items ran), the items run, the
-criteria's and the script's sha256 and whether each is the published one, the sha256 of
-`metadata.yaml`, and each item's headline numbers. The last line of the table names a partial
-run too. Progress lines (`hashing:`, `reading:`, `projecting:`) and warnings go to standard error.
-The JSON report is strict JSON: a value JSON cannot hold, such as a NaN in `metadata.yaml`, is
-written as a string.
+criteria's and the script's sha256 and whether each is the published one, the criteria's
+`meets_test_definition`, the sha256 of `metadata.yaml`, and each item's headline numbers and
+`criterion`, the values it applied. The last line of the table names a partial run too. Progress
+lines (`hashing:`, `reading:`, `projecting:`) and warnings go to standard error. The JSON report
+is strict JSON: a value JSON cannot hold, such as a NaN in `metadata.yaml`, is written as a
+string.
 
 | Exit status | Meaning |
 |---|---|

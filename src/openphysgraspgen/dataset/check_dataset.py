@@ -1411,6 +1411,49 @@ CRITERIA = {
         ("max_categories", lambda v: _is_int(v, 1), "an integer of at least 1"),
     ),
 }
+# The dataset test's own values (docs/dataset/format.md): at least 1,000,000 frames, no
+# mismatch, every frame of both consistency parts on these four layers, and at least 10
+# object types. The criteria a dataset publishes may be weaker; the report says so.
+TEST_DEFINITION = {
+    "scale": {"min_frames": 1_000_000},
+    "metadata": {"max_mismatches": 0},
+    "consistency": {
+        "min_pass_fraction": 1.0,
+        "layers": ["rgb", "depth", "force", "stress"],
+    },
+    "diversity": {"min_object_types": 10},
+}
+
+
+def meets_test_definition(criteria: Mapping[str, Any]) -> bool:
+    """Whether criteria are at least as strict as TEST_DEFINITION, whichever items run:
+    as many frames and object types or more, as many mismatches or fewer, and as high a
+    pass fraction on the test's layers and any others. A value that is missing, or that
+    its item could not apply, meets nothing."""
+
+    def value(item: str, key: str) -> Any:
+        table = criteria.get(item)
+        return table.get(key) if isinstance(table, Mapping) else None
+
+    test = TEST_DEFINITION
+    mismatches = value("metadata", "max_mismatches")
+    layers = value("consistency", "layers")
+    return bool(
+        _is_int(value("scale", "min_frames"), test["scale"]["min_frames"])
+        and _is_int(mismatches, 0)
+        and mismatches <= test["metadata"]["max_mismatches"]
+        and _number(
+            value("consistency", "min_pass_fraction"),
+            test["consistency"]["min_pass_fraction"],
+            1,
+        )
+        and _names(layers, CHANNELS)
+        and set(test["consistency"]["layers"]) <= set(layers)
+        and _is_int(
+            value("diversity", "min_object_types"),
+            test["diversity"]["min_object_types"],
+        )
+    )
 
 
 def validate_criteria(
@@ -4058,7 +4101,8 @@ def check_published_tools(
 ) -> dict[str, Any]:
     """Whether this run applies the criteria file and runs the script whose sha256
     metadata.yaml lists. The digests are those of the bytes this run read: the criteria
-    file's when it was loaded, the script's when the run began."""
+    file's when it was loaded, the script's when the run began. Beside them, and not in
+    the verdict, whether the criteria are at least as strict as the test's own values."""
     stated = {
         rel: str(ds.tools[rel].get("sha256", "")).lower() if rel in ds.tools else None
         for rel in TOOL_FILES
@@ -4081,6 +4125,7 @@ def check_published_tools(
             "sha256": criteria_sha256,
             "published_sha256": stated[criteria_rel],
             "matches_published": bool(same),
+            "meets_test_definition": meets_test_definition(criteria),
         },
         "script": {
             "path": str(Path(__file__).resolve()),
@@ -4366,9 +4411,14 @@ def format_table(report: Mapping[str, Any]) -> str:
     ]
     for key in ("criteria", "script"):
         p = published[key]
+        strict = ""
+        if key == "criteria":
+            strict = "; at least as strict as the test: " + (
+                "yes" if p["meets_test_definition"] else "NO"
+            )
         lines.append(
             f"{key}: {p['path']} (sha256 {(p['sha256'] or '?')[:16]}; the published "
-            f"one: {'yes' if p['matches_published'] else 'NO'})"
+            f"one: {'yes' if p['matches_published'] else 'NO'}{strict})"
         )
     lines.append(
         "items run: "
@@ -4422,8 +4472,9 @@ def format_table(report: Mapping[str, Any]) -> str:
 
 
 def summary(report: Mapping[str, Any]) -> dict[str, Any]:
-    """The RESULT line's payload: the verdict, whether every item ran, and each item's
-    headline numbers."""
+    """The RESULT line's payload: the verdict, whether every item ran, the tools and
+    whether the criteria meet the test's own values, and each item's headline numbers
+    and the criterion it applied."""
     out: dict[str, Any] = {
         "pass": report["pass"],
         "complete": report["complete"],
@@ -4432,6 +4483,8 @@ def summary(report: Mapping[str, Any]) -> dict[str, Any]:
     for key in ("criteria", "script"):
         p = report["published_tools"][key]
         out[key] = {"sha256": p["sha256"], "matches_published": p["matches_published"]}
+        if key == "criteria":
+            out[key]["meets_test_definition"] = p["meets_test_definition"]
     out["metadata_yaml"] = {"sha256": report["dataset"]["metadata_sha256"]}
     for item, r in report["items"].items():
         if item == "scale":
@@ -4473,9 +4526,6 @@ def summary(report: Mapping[str, Any]) -> dict[str, Any]:
                         "statuses",
                     )
                 },
-                "projection_tolerance_provenance": r["criterion"][
-                    "projection_tolerance_provenance"
-                ],
             }
         else:
             out[item] = {
@@ -4485,6 +4535,8 @@ def summary(report: Mapping[str, Any]) -> dict[str, Any]:
                 "n_files_without_type": len(r["files_without_type"]),
                 "n_files_missing_facts": len(r["files_missing_facts"]),
             }
+        # The values applied, the projection tolerance's provenance among them.
+        out[item]["criterion"] = r["criterion"]
     return out
 
 

@@ -432,14 +432,16 @@ def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_pat
         "n_episodes": N_EPISODES,
         "n_files": N_DATA_FILES,
         "n_files_with_errors": 0,
+        "criterion": {"min_frames": N_FRAMES},
     }
     assert payload["metadata"]["spec"]["n_channels"] == 6
     assert type(payload["consistency"]["projection"]["n_candidates"]) is int
-    assert payload["consistency"]["projection_tolerance_provenance"].startswith(
-        "placeholder: "
-    )
+    provenance = payload["consistency"]["criterion"]["projection_tolerance_provenance"]
+    assert provenance.startswith("placeholder: ")
     for key in ("criteria", "script"):
         assert payload[key]["matches_published"] is True
+    # The dataset's own criteria, which ten frames meet, are weaker than the test's.
+    assert payload["criteria"]["meets_test_definition"] is False
     digest = hashlib.sha256((root / "metadata.yaml").read_bytes()).hexdigest()
     assert payload["metadata_yaml"] == {"sha256": digest}
 
@@ -464,6 +466,10 @@ def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_pat
         "criteria",
     ]
     assert report["criteria"]["scale"] == {"min_frames": N_FRAMES}
+    # The RESULT line gives each item's criterion as the report does.
+    for item in fmt.ITEMS:
+        assert payload[item]["criterion"] == report["items"][item]["criterion"]
+    assert report["published_tools"]["criteria"]["meets_test_definition"] is False
     assert report["environment"]["pyarrow"] == pa.__version__
 
 
@@ -570,6 +576,39 @@ def test_the_package_ships_the_published_acceptance_values():
     criteria, _ = fmt.load_criteria(SCRIPT.with_name("check_criteria.yaml"))
     # As JSON text, 1 is not 1.0.
     assert json.dumps(criteria, sort_keys=True) == json.dumps(PUBLISHED, sort_keys=True)
+
+
+@pytest.mark.parametrize(
+    ("item", "key", "value", "meets"),
+    [
+        ("scale", "min_frames", 999_999, False),
+        ("scale", "min_frames", 2_000_000, True),
+        ("metadata", "max_mismatches", 1, False),
+        ("consistency", "min_pass_fraction", 0.999, False),
+        ("consistency", "min_pass_fraction", 1, True),
+        ("consistency", "layers", ["rgb", "depth", "force"], False),
+        ("consistency", "layers", list(fmt.CHANNELS), True),
+        ("diversity", "min_object_types", 9, False),
+        ("diversity", "min_object_types", 30, True),
+        # The test gives no tolerance of its own: it is to be agreed.
+        ("consistency", "projection_radius_px", 40.0, True),
+        # A value no item could apply meets nothing, and raises nothing.
+        ("scale", "min_frames", "1000000", False),
+        ("scale", "min_frames", True, False),
+        ("metadata", "max_mismatches", None, False),
+        ("consistency", "layers", [["rgb"]], False),
+        ("diversity", "min_object_types", 10.0, False),
+    ],
+)
+def test_criteria_meet_the_test_definition_when_at_least_as_strict(
+    item, key, value, meets
+):
+    criteria = json.loads(json.dumps(PUBLISHED))
+    assert fmt.meets_test_definition(criteria)
+    criteria[item][key] = value
+    assert fmt.meets_test_definition(criteria) is meets
+    del criteria[item]
+    assert not fmt.meets_test_definition(criteria)
 
 
 BAD_CRITERIA = [
@@ -3372,6 +3411,26 @@ def test_a_tool_that_is_not_listed_fails_the_run(root):
     report = check(root)
     assert report["published_tools"]["criteria"]["published_sha256"] is None
     assert not report["pass"]
+
+
+def test_the_run_says_whether_the_published_criteria_are_as_strict_as_the_test(
+    root, capsys
+):
+    # Published with criteria weaker than the test's, the dataset passes them, and the
+    # run says they are weaker without changing its verdict.
+    code, out, _, payload = main(capsys, root, "--seed", SEED)
+    assert (code, payload["pass"]) == (0, True)
+    assert payload["criteria"]["matches_published"] is True
+    assert payload["criteria"]["meets_test_definition"] is False
+    assert "; the published one: yes; at least as strict as the test: NO)" in out
+    assert payload["scale"]["criterion"] == {"min_frames": N_FRAMES}
+    # Published with the test's own values, which these ten frames do not meet.
+    republish(root, CRITERIA, criteria_text().encode())
+    code, out, _, payload = main(capsys, root, "--seed", SEED)
+    assert (code, payload["pass"]) == (1, False)
+    assert payload["criteria"]["meets_test_definition"] is True
+    assert "; the published one: yes; at least as strict as the test: yes)" in out
+    assert payload["scale"]["criterion"] == {"min_frames": 1_000_000}
 
 
 # --- the shipped script ---------------------------------------------------------------
