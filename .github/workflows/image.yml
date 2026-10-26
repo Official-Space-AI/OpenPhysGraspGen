@@ -70,6 +70,9 @@ jobs:
             echo "IMAGE=openphysgraspgen:check" >> "$GITHUB_ENV"
             echo "NAME=openphysgraspgen-image-check" >> "$GITHUB_ENV"
           fi
+          # sbom-action does not create the folder of its output file. A release brings it
+          # with the release artifact; other runs do not have it.
+          mkdir -p sbom
       # linux/amd64 only. GitHub's attestation is the image's provenance, so BuildKit adds
       # none and the image is a single manifest.
       - name: Build the image
