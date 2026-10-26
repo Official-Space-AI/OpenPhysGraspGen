@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Actions in .github/workflows are pinned to commit SHAs; Dependabot updates the SHA
+  # and the release tag in the comment together.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Python dependencies declared in pyproject.toml.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

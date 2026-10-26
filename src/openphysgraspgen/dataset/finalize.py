@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
-import struct
-from concurrent.futures import ThreadPoolExecutor
+import subprocess
+import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import pyarrow as pa
-import pyarrow.parquet as pq
 import yaml
 
 from . import check_dataset as fmt
@@ -21,9 +21,6 @@ from . import check_dataset as fmt
 class DatasetError(ValueError):
     pass
 
-
-# What reading a damaged or foreign file can raise.
-READ_ERRORS = (OSError, ValueError, IndexError, struct.error, pa.ArrowException)
 
 # What every episode of a dataset must state alike. video is the encoder settings; the
 # ffmpeg build that ran them may differ between episodes.
@@ -47,6 +44,8 @@ WRITTEN = (fmt.METADATA_NAME, fmt.CHECKSUMS_NAME, GITATTRIBUTES_NAME)
 # Files at the root that are not data and are not hashed.
 ROOT_FILES = (*WRITTEN, "README.md")
 SKIPPED_DIRS = (".git", ".cache")
+# The Hugging Face Hub holds at most this many files in a folder.
+MAX_FOLDER_FILES = 10_000
 # A git checkout must keep the hashed text files byte for byte (core.autocrlf), and the
 # episode files go through Git LFS, as the Hugging Face Hub stores them.
 GITATTRIBUTES = """\
@@ -82,24 +81,12 @@ def card_front_matter(license: str = "CC-BY-4.0") -> str:
     return f"---\n{yaml.safe_dump(header, sort_keys=False)}---\n"
 
 
-def _sha256(path: Path) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    size = 0
-    with open(path, "rb") as stream:
-        while chunk := stream.read(1 << 22):
-            digest.update(chunk)
-            size += len(chunk)
-    return digest.hexdigest(), size
+class _Dumper(yaml.SafeDumper):
+    """Writes a value as often as metadata.yaml holds it, never as an alias, which the
+    check refuses."""
 
-
-def _footer(metadata: pq.FileMetaData) -> dict[str, Any]:
-    raw = (metadata.metadata or {}).get(fmt.METADATA_KEY.encode())
-    if raw is None:
-        raise DatasetError(f"carries no {fmt.METADATA_KEY} metadata")
-    footer = json.loads(raw)
-    if not isinstance(footer, dict):
-        raise DatasetError(f"its {fmt.METADATA_KEY} metadata is not a mapping")
-    return footer
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
 
 
 def _refuse(errors: list[str]) -> None:
@@ -109,121 +96,72 @@ def _refuse(errors: list[str]) -> None:
         )
 
 
-def _write_atomic(path: Path, text: str) -> None:
+def _write_atomic(path: Path, data: str | bytes) -> None:
     part = path.with_name(path.name + ".part")
-    part.write_text(text, encoding="utf-8")
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    part.write_bytes(data)
     os.replace(part, path)
 
 
-def _frame_schema(meta: dict[str, Any]) -> pa.Schema:
-    sizes = {c: (s["height"], s["width"]) for c, s in meta["image_size"].items()}
-    return fmt.frame_schema(tuple(meta["channels"]), tuple(meta["cameras"]), sizes)
-
-
-def _read_parquet(path: Path, schema: pa.Schema) -> tuple[pq.FileMetaData, int]:
-    """Read every column of every row group, which decodes every page and checks its
-    checksum; returns the footer and the row count."""
-    with pq.ParquetFile(path, page_checksum_verification=True) as parquet:
-        found = parquet.schema_arrow
-        if not found.equals(schema, check_metadata=False):
-            raise DatasetError("its columns are not the format's")
-        # A column's shape is in its field metadata, which equals() leaves out.
-        differ = [f.name for f, g in zip(found, schema) if f.metadata != g.metadata]
-        if differ:
-            raise DatasetError(f"the field metadata of {differ} is not the format's")
-        for group in range(parquet.num_row_groups):
-            parquet.read_row_group(group)
-        return parquet.metadata, parquet.metadata.num_rows
-
-
-def _check_file(path: Path, kind: str, meta: dict[str, Any], camera: str | None) -> int:
-    """Read an episode's file in full; returns its row or video frame count."""
-    if kind == "frames":
-        _, rows = _read_parquet(path, _frame_schema(meta))
-        if rows != meta["n_frames"]:
-            raise DatasetError(
-                f"holds {rows} frames, its metadata says {meta['n_frames']}"
-            )
-        return rows
-    if kind == "trajectory":
-        metadata, rows = _read_parquet(path, fmt.trajectory_schema())
-        own = _footer(metadata)
-        if own != meta:
-            keys = sorted(k for k in {*own, *meta} if own.get(k) != meta.get(k))
-            raise DatasetError(f"its metadata differs from the frames file's in {keys}")
-        if rows != meta["n_steps"]:
-            raise DatasetError(
-                f"holds {rows} steps, its metadata says {meta['n_steps']}"
-            )
-        return rows
-    tracks = fmt.video_tracks(path)
-    if len(tracks) != 1:
-        raise DatasetError(f"holds {len(tracks)} video tracks, not one")
-    size = meta["image_size"][camera]
-    problem = fmt.video_error(
-        tracks[0], (size["height"], size["width"]), meta["fps"], meta["n_frames"]
+def _tools(criteria: str | Path | None) -> tuple[dict[str, bytes], dict[str, Any]]:
+    """The bytes of the two tool files every dataset ships: this package's check module
+    itself, and the criteria file, the packaged one unless criteria names another. Both
+    are refused when the check could not run with them."""
+    source = (
+        Path(fmt.__file__).with_name(fmt.CRITERIA_NAME)
+        if criteria is None
+        else Path(criteria)
     )
-    if problem:
-        raise DatasetError(problem)
-    return tracks[0].n_frames
-
-
-def _verify(
-    path: Path, kind: str, meta: dict[str, Any], camera: str | None
-) -> tuple[str | None, int, str, int]:
-    """Read a file in full, then hash it: (what is wrong, count, sha256, bytes)."""
     try:
-        count = _check_file(path, kind, meta, camera)
-        sha, size = _sha256(path)
-    except DatasetError as exc:
-        return str(exc), 0, "", 0
-    except READ_ERRORS as exc:
-        return f"cannot be read: {exc}", 0, "", 0
-    except (KeyError, TypeError) as exc:
-        return f"its metadata does not describe it: {exc!r}", 0, "", 0
-    return None, count, sha, size
-
-
-def _episode_error(rel: str, meta: dict[str, Any]) -> str | None:
-    _, object_type, name = rel.split("/")
-    uid = name[: -len(fmt.PARQUET_SUFFIX)]
-    if (
-        meta.get("format") != fmt.FORMAT
-        or meta.get("format_version") != fmt.FORMAT_VERSION
-    ):
-        return f"{rel} is not {fmt.FORMAT} {fmt.FORMAT_VERSION}"
-    lacking = [key for key in fmt.EPISODE_KEYS if key not in meta]
-    if lacking:
-        return f"{rel}: its metadata lacks {lacking}"
-    if meta["episode_uid"] != uid or meta["object_type"] != object_type:
-        return f"{rel} holds episode {meta['episode_uid']} of {meta['object_type']}"
-    if not isinstance(meta["object_asset"], str) or not meta["object_asset"]:
-        return f"{rel}: its object_asset is not a nonempty string"
-    if meta["label"] not in fmt.LABELS:
-        return f"{rel}: its label {meta['label']!r} is not one of {list(fmt.LABELS)}"
-    for key in ("n_frames", "n_steps", "n_tets", "fps", "recorded_fps"):
-        if type(meta[key]) is not int or meta[key] < 1:
-            return f"{rel}: its {key} is not a positive integer: {meta[key]!r}"
-    if meta["recorded_fps"] % meta["fps"]:
-        return f"{rel}: its fps {meta['fps']} does not divide its recorded_fps"
+        script = Path(fmt.__file__).read_bytes()
+        data = source.read_bytes()
+    except OSError as exc:
+        raise DatasetError(
+            f"cannot finalize the dataset: no tool files: {exc}"
+        ) from exc
     try:
-        _frame_schema(meta)
-    except (KeyError, TypeError, ValueError, AttributeError) as exc:
-        return f"{rel}: its metadata does not describe its columns: {exc!r}"
-    if "rgb" in meta["channels"]:
-        if not isinstance(meta["video"], dict) or not isinstance(
-            meta["ffmpeg_version"], str
-        ):
-            return (
-                f"{rel}: with rgb, its video must be a mapping and its ffmpeg_version "
-                "a string"
-            )
-    elif meta["video"] is not None or meta["ffmpeg_version"] is not None:
-        return f"{rel}: without rgb, its video and ffmpeg_version must be null"
-    problem = fmt.facts_error(meta["facts"])
-    if problem:
-        return f"{rel}: {problem}"
-    return None
+        values = fmt.load_yaml(data, f"criteria file {source}")
+        if not isinstance(values, dict):
+            raise fmt.CheckError(f"criteria file {source} is not a YAML mapping")
+        fmt.validate_criteria(values)
+    except fmt.CheckError as exc:
+        raise DatasetError(f"cannot finalize the dataset: {exc}") from None
+    return dict(zip(fmt.TOOL_FILES, (script, data))), values
+
+
+def _published_check(root: Path, seed: int, workers: int) -> dict[str, Any]:
+    """Run the dataset's own tools/check_dataset.py on it with this interpreter, and
+    return its exit status and RESULT payload; a check that could not run is refused."""
+    root = root.resolve()
+    done = subprocess.run(
+        [
+            sys.executable,
+            str(root / fmt.TOOL_FILES[0]),
+            str(root),
+            "--seed",
+            str(seed),
+            "--workers",
+            str(max(1, workers)),
+        ],
+        stdout=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        check=False,
+    )
+    lines = done.stdout.strip().splitlines()
+    payload = None
+    if lines and lines[-1].startswith("RESULT "):
+        with contextlib.suppress(ValueError):
+            payload = json.loads(lines[-1].removeprefix("RESULT "))
+    if done.returncode not in (0, 1) or not isinstance(payload, dict):
+        reason = payload.get("reason") if isinstance(payload, dict) else None
+        raise DatasetError(
+            f"the dataset check could not run (exit status {done.returncode}): "
+            f"{reason or 'it printed no RESULT line'}"
+        )
+    return {"exit_status": done.returncode, **payload}
 
 
 def finalize_dataset(
@@ -232,115 +170,96 @@ def finalize_dataset(
     doi: str | None = None,
     download_url: str | None = None,
     workers: int = 1,
+    criteria: str | Path | None = None,
+    check_seed: int | None = None,
 ) -> dict[str, Any]:
-    """Check the episodes under root, then write metadata.yaml, SHA256SUMS and
-    .gitattributes.
+    """Check the episodes under root with the dataset check's own rules, then write the
+    check and its criteria into tools/, then .gitattributes, metadata.yaml and
+    SHA256SUMS.
 
-    Each Parquet file is read in full and each video's index parsed, in `workers`
-    threads, before the file is hashed. doi is a bare DOI (10.<registrant>/<suffix>)
-    and download_url an https URL.
+    Every Parquet file is read in full, every page checksum verified and every value
+    rule applied, and every video's index read, in `workers` threads; then each file is
+    hashed. tools/check_dataset.py is the package's check_dataset.py byte for byte, and
+    tools/check_criteria.yaml the packaged acceptance values, or the file criteria names.
+    doi is a bare DOI (10.<registrant>/<suffix>, a registrant code of 4 to 9 digits)
+    and download_url an https URL. Nothing is written when the dataset is refused.
+
+    With check_seed, the tools/check_dataset.py written then checks the dataset with
+    that seed, run by this interpreter, and the metadata returned holds `check`: its
+    exit status and RESULT payload. A failed check is returned as such, and the check
+    fails until doi and download_url are given; one that could not run raises
+    DatasetError.
     """
     root = Path(root)
-    frames: dict[str, Path] = {}
-    trajectories: dict[str, Path] = {}
-    videos: dict[str, Path] = {}
-    tools: list[Path] = []
     errors: list[str] = []
     if doi is not None and not (
         isinstance(doi, str) and fmt.DOI_PATTERN.fullmatch(doi)
     ):
         errors.append(
-            f"doi must be a bare DOI, 10.<registrant>/<suffix> without a URL: {doi!r}"
+            "doi must be a bare DOI, 10.<registrant>/<suffix> with a registrant code "
+            f"of 4 to 9 digits and no URL: {doi!r}"
         )
     if download_url is not None and not (
         isinstance(download_url, str) and fmt.URL_PATTERN.fullmatch(download_url)
     ):
         errors.append(f"download_url must be an https:// URL: {download_url!r}")
+    if check_seed is not None and (
+        not isinstance(check_seed, int) or isinstance(check_seed, bool)
+    ):
+        errors.append(f"check_seed must be an integer: {check_seed!r}")
+    tools, values = _tools(criteria)
+    rels, others = fmt.find_data_files(root)
+    errors += [f"{rel} is not part of the format" for rel in others]
+    data_dirs = (fmt.DATA_DIR, fmt.TRAJECTORY_DIR, fmt.VIDEO_DIR)
     for directory, subdirs, names in os.walk(root):
         here = Path(directory)
         if here == root:
-            subdirs[:] = [d for d in subdirs if d not in SKIPPED_DIRS]
+            subdirs[:] = [d for d in subdirs if d not in (*SKIPPED_DIRS, *data_dirs)]
         for name in names:
-            path = here / name
-            rel = path.relative_to(root).as_posix()
-            parts = rel.split("/")
+            rel = (here / name).relative_to(root).as_posix()
             # A finalize that was stopped may leave its .part files, which it replaces.
-            if len(parts) == 1 and (
-                name in ROOT_FILES or name.removesuffix(".part") in WRITTEN
-            ):
+            written = name.removesuffix(".part")
+            if rel.count("/") == 0 and (name in ROOT_FILES or written in WRITTEN):
                 continue
-            if len(parts) == 2 and parts[0] == fmt.TOOLS_DIR:
-                tools.append(path)
-            elif (
-                len(parts) == 3
-                and parts[0] == fmt.DATA_DIR
-                and name.endswith(fmt.PARQUET_SUFFIX)
-            ):
-                frames[rel] = path
-            elif (
-                len(parts) == 3
-                and parts[0] == fmt.TRAJECTORY_DIR
-                and name.endswith(fmt.PARQUET_SUFFIX)
-            ):
-                trajectories[rel] = path
-            elif (
-                len(parts) == 4
-                and parts[0] == fmt.VIDEO_DIR
-                and name.endswith(fmt.VIDEO_SUFFIX)
-            ):
-                videos[rel] = path
-            else:
-                errors.append(f"{rel} is not part of the format")
-    if not frames and not errors:
+            # The tool files are replaced, and nothing else lies in tools/.
+            if f"{fmt.TOOLS_DIR}/{written}" in fmt.TOOL_FILES and rel.count("/") == 1:
+                continue
+            errors.append(f"{rel} is not part of the format")
+    if not any(rel.startswith(f"{fmt.DATA_DIR}/") for rel in rels) and not errors:
         errors.append("no episodes")
+    # The Hugging Face Hub refuses a folder of more files.
+    for folder, count in Counter(rel.rsplit("/", 1)[0] for rel in rels).items():
+        if count > MAX_FOLDER_FILES:
+            errors.append(
+                f"{folder} holds {count:,} files; the Hub allows {MAX_FOLDER_FILES:,} "
+                "in a folder"
+            )
+    _refuse(errors)
 
+    files = [fmt.data_file(rel) for rel in rels]
+    episodes = fmt.read_files(root, files, workers=workers)
+    errors += [f"{rec.rel}: {error}" for rec in files for error in rec.errors]
+    _refuse(errors)
+
+    metas = {e.frames.id.episode_uid: e.frames.footer for e in episodes.values()}
     shared: dict[str, set[str]] = {key: set() for key in SHARED_KEYS}
-    episodes = {}
-    expected_files: dict[str, tuple[str, dict[str, Any], str | None]] = {}
-    generation: dict[str, Any] = {}
-    export: dict[str, Any] = {}
-    for rel, path in sorted(frames.items()):
-        try:
-            meta = _footer(pq.read_metadata(path))
-        except READ_ERRORS as exc:
-            errors.append(f"{rel}: {exc}")
-            continue
-        problem = _episode_error(rel, meta)
-        if problem:
-            errors.append(problem)
-            continue
-        uid, object_type = meta["episode_uid"], meta["object_type"]
-        if uid in episodes:
-            errors.append(f"episode {uid} is under two object types")
-            continue
-        episodes[uid] = meta
+    kinds = values["diversity"]["required_fact_kinds"]
+    for episode in episodes.values():
+        meta = episode.frames.footer
         for key in SHARED_KEYS:
             shared[key].add(json.dumps(meta[key], sort_keys=True))
-        for record, store in (
-            (meta["generation_provenance"], generation),
-            (meta["export_provenance"], export),
-        ):
-            if record is not None:
-                store.setdefault(json.dumps(record, sort_keys=True), record)
-        name = f"{uid}{fmt.PARQUET_SUFFIX}"
-        expected_files[rel] = ("frames", meta, None)
-        expected_files[f"{fmt.TRAJECTORY_DIR}/{object_type}/{name}"] = (
-            "trajectory",
-            meta,
-            None,
-        )
-        if "rgb" in meta["channels"]:
-            for camera in meta["cameras"]:
-                expected_files[
-                    f"{fmt.VIDEO_DIR}/{camera}/{object_type}/{uid}{fmt.VIDEO_SUFFIX}"
-                ] = ("video", meta, camera)
-
-    for key, values in shared.items():
-        if len(values) > 1:
-            errors.append(f"episodes disagree on {key}: {sorted(values)}")
+        lacking = [k for k in kinds if not fmt.holds_a_value(meta["facts"].get(k))]
+        if lacking:
+            errors.append(
+                f"{episode.frames.rel}: its facts lack {lacking}, which the criteria "
+                "require"
+            )
+    for key, found in shared.items():
+        if len(found) > 1:
+            errors.append(f"episodes disagree on {key}: {sorted(found)}")
     spellings: dict[str, set[str]] = {}
     filed: dict[str, set[str]] = {}
-    for meta in episodes.values():
+    for meta in metas.values():
         key = meta["object_type"].strip().lower()
         spellings.setdefault(key, set()).add(meta["object_type"])
         filed.setdefault(meta["object_asset"], set()).add(meta["object_type"])
@@ -350,45 +269,32 @@ def finalize_dataset(
     for asset, types in sorted(filed.items()):
         if len(types) > 1:
             errors.append(f"object asset {asset} is under object types {sorted(types)}")
-    present = {**frames, **trajectories, **videos}
-    for rel in sorted(set(present) - set(expected_files)):
-        errors.append(f"{rel} belongs to no episode")
-    for rel in sorted(set(expected_files) - set(present)):
-        errors.append(f"{rel} is missing")
     _refuse(errors)
 
-    checked = sorted(expected_files)
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        results = list(
-            pool.map(
-                lambda rel: _verify(present[rel], *expected_files[rel]),
-                checked,
-            )
-        )
-        tool_digests = list(pool.map(_sha256, sorted(tools)))
-    files = []
-    for rel, (problem, count, sha, size) in zip(checked, results):
-        if problem:
-            errors.append(f"{rel}: {problem}")
-            continue
-        kind, meta, _ = expected_files[rel]
-        entry = {
-            "path": rel,
-            "kind": kind,
-            "episode_uid": meta["episode_uid"],
-            "object_type": meta["object_type"],
-        }
-        entry["n_steps" if kind == "trajectory" else "n_frames"] = count
-        files.append({**entry, "sha256": sha, "bytes": size})
+    hashes, stats = fmt.hash_files(root, rels, workers)
+    errors += [f"{rel} cannot be read" for rel in rels if hashes.get(rel) is None]
     _refuse(errors)
+    files_out = []
+    for rec in files:
+        entry = {
+            "path": rec.rel,
+            "kind": rec.kind,
+            "episode_uid": rec.id.episode_uid,
+            "object_type": rec.id.object_type,
+        }
+        count = rec.track.n_frames if rec.kind == "video" else rec.n_rows
+        entry["n_steps" if rec.kind == "trajectory" else "n_frames"] = count
+        files_out.append(
+            {**entry, "sha256": hashes[rec.rel], "bytes": stats[rec.rel][0]}
+        )
     tool_entries = [
-        {"path": path.relative_to(root).as_posix(), "sha256": sha, "bytes": size}
-        for path, (sha, size) in zip(sorted(tools), tool_digests)
+        {"path": rel, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+        for rel, data in tools.items()
     ]
 
-    first = next(iter(episodes.values()))
+    first = next(iter(metas.values()))
     object_types: dict[str, dict[str, Any]] = {}
-    for meta in episodes.values():
+    for meta in metas.values():
         entry = object_types.setdefault(
             meta["object_type"], {"n_episodes": 0, "n_frames": 0, "assets": set()}
         )
@@ -399,8 +305,17 @@ def finalize_dataset(
         entry["assets"] = sorted(entry["assets"])
     video = first["video"]
     if video is not None:
-        builds = {meta["ffmpeg_version"] for meta in episodes.values()}
+        builds = {meta["ffmpeg_version"] for meta in metas.values()}
         video = {**video, "ffmpeg_versions": sorted(builds)}
+    generation: dict[str, Any] = {}
+    export: dict[str, Any] = {}
+    for meta in metas.values():
+        for record, store in (
+            (meta["generation_provenance"], generation),
+            (meta["export_provenance"], export),
+        ):
+            if record is not None:
+                store.setdefault(json.dumps(record, sort_keys=True), record)
     metadata = {
         "format": fmt.FORMAT,
         "format_version": fmt.FORMAT_VERSION,
@@ -417,15 +332,15 @@ def finalize_dataset(
         "image_size": first["image_size"],
         "video": video,
         "counts": {
-            "n_frames": sum(m["n_frames"] for m in episodes.values()),
-            "n_episodes": len(episodes),
-            "n_files": len(files),
+            "n_frames": sum(m["n_frames"] for m in metas.values()),
+            "n_episodes": len(metas),
+            "n_files": len(files_out),
             "n_object_types": len(object_types),
-            "n_object_assets": len({m["object_asset"] for m in episodes.values()}),
+            "n_object_assets": len({m["object_asset"] for m in metas.values()}),
             "n_channels": len(first["channels"]),
         },
         "object_types": dict(sorted(object_types.items())),
-        "files": files,
+        "files": files_out,
         "tools": tool_entries,
         "conventions": {
             **fmt.CONVENTIONS,
@@ -436,13 +351,20 @@ def finalize_dataset(
             "export": list(export.values()),
         },
     }
+    (root / fmt.TOOLS_DIR).mkdir(exist_ok=True)
+    for rel, data in tools.items():
+        _write_atomic(root / rel, data)
+    _write_atomic(root / GITATTRIBUTES_NAME, GITATTRIBUTES)
     _write_atomic(
         root / fmt.METADATA_NAME,
-        yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True, width=100),
+        yaml.dump(
+            metadata, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=100
+        ),
     )
-    sums = sorted((f["path"], f["sha256"]) for f in [*files, *tool_entries])
+    sums = sorted((f["path"], f["sha256"]) for f in [*files_out, *tool_entries])
     _write_atomic(
         root / fmt.CHECKSUMS_NAME, "".join(f"{sha}  {rel}\n" for rel, sha in sums)
     )
-    _write_atomic(root / GITATTRIBUTES_NAME, GITATTRIBUTES)
+    if check_seed is not None:
+        metadata["check"] = _published_check(root, check_seed, workers)
     return metadata
