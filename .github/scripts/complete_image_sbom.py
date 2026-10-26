@@ -11,7 +11,12 @@ Syft leaves the license as NOASSERTION where it cannot read one, and it does not
 the libraries that the NumPy wheel bundles in numpy.libs. This fills in the licenses
 below and adds a package for each of those libraries. A package still without a
 license, such as a new one after a base image update, stops the release: read its
-license and add it here.
+license and add it here. So does an image with NumPy but no numpy.libs, which means the
+NumPy wheel's layout has changed.
+
+The licenses below are keyed by name, not version, so the script prints each package it
+filled in with its version. After a base image update, copy that list into the
+re-evaluation issue and read each license again for its new version.
 """
 
 import json
@@ -34,8 +39,10 @@ LICENSES = {
         "libcrypt1": "LGPL-2.1-or-later AND BSD-2-Clause AND BSD-3-Clause AND 0BSD",
     },
     "pkg:generic": {
-        # /usr/local/lib/python3.12/LICENSE.txt: PSF License Version 2
-        "python": "PSF-2.0",
+        # /usr/local/lib/python3.12/LICENSE.txt: the PSF, BeOpen, CNRI and CWI licenses
+        # (SPDX Python-2.0.1; PSF-2.0 is only the first of them), and the zero-clause BSD
+        # license for code in the documentation, which pydoc_data/topics.py carries
+        "python": "Python-2.0.1 AND 0BSD",
     },
     "/usr/local/lib/python3.12/site-packages/pip/_vendor/distlib": {
         # PC/launcher.c in the distlib sdist; pip vendors distlib without its license
@@ -78,18 +85,28 @@ def main(sbom_path, numpy_libs_path):
         sbom = json.load(f)
     packages, relationships = sbom["packages"], sbom["relationships"]
 
-    filled = 0
+    filled = []
     for package in packages:
         license_ = LICENSES.get(origin(package), {}).get(package["name"])
         if license_ and unlicensed(package):
             package.update(licenseDeclared=license_, licenseComments=NOTE)
-            filled += 1
+            filled.append(
+                f"  {package['name']} {package.get('versionInfo', '')}"
+                f" ({origin(package)}): {license_}"
+            )
 
     with open(numpy_libs_path, encoding="utf-8") as f:
         paths = f.read().split()
     numpy = [p for p in packages if p["name"] == "numpy" and origin(p) == "pkg:pypi"]
     if paths and not numpy:
         sys.exit("The SBOM has no numpy package to hold the libraries in numpy.libs.")
+    if numpy and not paths:
+        sys.exit(
+            "NumPy is in the image but its numpy.libs folder is empty or missing, so the"
+            " NumPy wheel's layout has changed. Find the libraries it bundles now, update"
+            " NUMPY_LIBS in .github/scripts/complete_image_sbom.py and NOTICE.container."
+        )
+    added = []
     for path in paths:
         file_name = path.rpartition("/")[2]
         name = next((lib for lib in NUMPY_LIBS if file_name.startswith(lib)), file_name)
@@ -116,6 +133,7 @@ def main(sbom_path, numpy_libs_path):
                 "relationshipType": "CONTAINS",
             }
         )
+        added.append(f"  {file_name}: {NUMPY_LIBS.get(name, 'NOASSERTION')}")
 
     image = [
         r["relatedSpdxElement"]
@@ -137,7 +155,10 @@ def main(sbom_path, numpy_libs_path):
     sbom["creationInfo"]["creators"].append("Tool: complete_image_sbom.py")
     with open(sbom_path, "w", encoding="utf-8") as f:
         json.dump(sbom, f, ensure_ascii=False)
-    print(f"Filled in {filled} licenses, added {len(paths)} libraries from numpy.libs.")
+    print(f"Filled in {len(filled)} licenses by name; check each for its version:")
+    print("\n".join(filled))
+    print(f"Added {len(added)} libraries from numpy.libs, which carry no version:")
+    print("\n".join(added))
 
 
 if __name__ == "__main__":

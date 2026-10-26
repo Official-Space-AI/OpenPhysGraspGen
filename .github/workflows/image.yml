@@ -87,7 +87,8 @@ jobs:
           upload-artifact: false
       # The policy for container base images requires a license for every package in the
       # image SBOM. This adds the licenses Syft cannot read and the libraries the NumPy
-      # wheel bundles in numpy.libs, and fails if a package is still without a license.
+      # wheel bundles in numpy.libs, and fails if a package is still without a license or
+      # if NumPy is in the image but numpy.libs is not.
       - name: Complete the image SBOM
         run: |
           docker run --rm --entrypoint sh "$IMAGE" \
