@@ -1,0 +1,135 @@
+name: Image
+
+# Builds the container image from a wheel and runs, without pushing anything, what a
+# release must pass before its PyPI upload: the image checks, the image SBOM and its
+# license completion, and the gate on fixable vulnerabilities of severity high or above.
+# It also records every known vulnerability in a Grype report. It runs on pull requests
+# that touch the image, on pushes to main, and every week, so that a new advisory or an
+# outdated base image shows up before a release does.
+#
+# The Release workflow calls it with `release: true`. It then builds the image from the
+# wheel the release built and keeps the image, its SBOM and the report for the jobs that
+# run after the PyPI upload.
+#
+# Third-party actions are pinned to full commit SHAs, with the release tag in a comment.
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - docker/**
+      - pyproject.toml
+      - .github/scripts/check_image.sh
+      - .github/scripts/complete_image_sbom.py
+      - .github/workflows/image.yml
+      - .github/workflows/release.yml
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        description: Build from the release's wheel and keep the image for the push
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the release's wheel
+        if: inputs.release
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - if: ${{ !inputs.release }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        if: ${{ !inputs.release }}
+        run: |
+          pip install build==1.6.1
+          python -m build --wheel
+      - name: Name the image and its files
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if [ "$RELEASE" = true ]; then
+            echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/openphysgraspgen:${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            echo "NAME=openphysgraspgen-image-$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE=openphysgraspgen:check" >> "$GITHUB_ENV"
+            echo "NAME=openphysgraspgen-image-check" >> "$GITHUB_ENV"
+          fi
+      # linux/amd64 only. GitHub's attestation is the image's provenance, so BuildKit adds
+      # none and the image is a single manifest.
+      - name: Build the image
+        run: docker build --platform linux/amd64 --provenance=false --tag "$IMAGE" .
+      - name: Check the image
+        run: sh .github/scripts/check_image.sh "$IMAGE"
+      # Syft lists the packages in the image, the base image's Debian packages included,
+      # with the licenses it can read from them.
+      - name: Generate the image SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3 (Syft v1.54.0)
+        with:
+          image: ${{ env.IMAGE }}
+          format: spdx-json
+          output-file: sbom/${{ env.NAME }}.spdx.json
+          upload-artifact: false
+      # The policy for container base images requires a license for every package in the
+      # image SBOM. This adds the licenses Syft cannot read and the libraries the NumPy
+      # wheel bundles in numpy.libs, and fails if a package is still without a license.
+      - name: Complete the image SBOM
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE" \
+            -c 'ls -d /usr/local/lib/python3*/site-packages/numpy.libs/* 2>/dev/null || true' > "$RUNNER_TEMP/numpy-libs.txt"
+          python3 .github/scripts/complete_image_sbom.py "sbom/$NAME.spdx.json" "$RUNNER_TEMP/numpy-libs.txt"
+      # Every known vulnerability, with or without a fix, for the release page and the
+      # quarterly re-evaluation. This step never fails the run.
+      - name: Record the known vulnerabilities
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2 (Grype v0.118.0)
+        with:
+          sbom: sbom/${{ env.NAME }}.spdx.json
+          fail-build: false
+          only-fixed: false
+          output-format: json
+          output-file: ${{ env.NAME }}.grype.json
+      # Fails on a known vulnerability of severity high or above that has a fix, which means
+      # the pinned base image is out of date (see RELEASING.md). Findings without a fix
+      # pass here and are listed in the report above.
+      - name: Scan the image SBOM for fixable vulnerabilities
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2 (Grype v0.118.0)
+        with:
+          sbom: sbom/${{ env.NAME }}.spdx.json
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-sbom
+          path: sbom/${{ env.NAME }}.spdx.json
+      # Kept when the gate fails too, to see what failed it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: image-scan
+          path: ${{ env.NAME }}.grype.json
+      - name: Save the image for the push
+        if: inputs.release
+        run: docker save --output "$RUNNER_TEMP/image.tar" "$IMAGE"
+      # A failed push can be re-run within 30 days of the run.
+      - if: inputs.release
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image
+          path: ${{ runner.temp }}/image.tar
+          retention-days: 30
