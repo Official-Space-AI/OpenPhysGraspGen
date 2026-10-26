@@ -42,9 +42,12 @@ checked for known vulnerabilities and license policy.
 
 The container image is built from the released wheel on a pinned official Python
 image, and its build provenance and SBOM are attested. A release stops on a known
-vulnerability of severity high or above that has a fix. Findings without a fix,
-mostly in the base image's Debian packages, are accepted until Debian ships one:
-the full Grype report is attached to each release, and the findings are reviewed in
-the quarterly `re-evaluation` issue. The libraries that NumPy bundles in
-`numpy.libs` carry no version in the image SBOM on purpose, so automated matching
-skips them; their advisories are checked by hand in the same issue.
+vulnerability of severity high or above that has a fix. Findings without a fix are
+mostly in the base image's Debian packages. Those of severity high or above are
+assessed one by one in a public issue before the first release that ships them: a
+finding in code that the image does not contain or never runs is recorded as not
+affected, with the reason, and any other is accepted only until a stated date, when
+it is assessed again. The others are reviewed in the quarterly `re-evaluation`
+issue. The full Grype report is attached to each release. The libraries that NumPy
+bundles in `numpy.libs` carry no version in the image SBOM on purpose, so automated
+matching skips them; their advisories are checked by hand in the quarterly issue.

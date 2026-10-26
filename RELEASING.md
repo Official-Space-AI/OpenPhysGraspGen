@@ -31,7 +31,9 @@ because that is the import name of the project's internal solver package (#28).
 
 1. Open a pull request that sets `version` in `pyproject.toml` (for example `1.0.0rc1`) and
    updates the roadmap in the README if needed. Merge it after review.
-2. Tag the merge commit and push the tag:
+2. Check the Grype report of the latest `Image` run on `main` (its `image-scan` artifact):
+   every finding of severity high or above without a fix needs an assessment, as described
+   under "Findings without a fix". Then tag the merge commit and push the tag:
 
    ```sh
    git switch main && git pull
@@ -96,8 +98,8 @@ image has a new release; review it like any other change.
 `pypa/gh-action-pypi-publish` must stay at v1.14.3 or later (GHSA-5xjx-3w67-w9x9).
 
 The `Image` workflow runs the release's image steps without pushing on every pull request
-that changes the image, on every push to `main` and every Monday, so a failing check or a
-new fixable vulnerability shows up before a release does.
+that changes the image, on every push to `main` and every Monday, so a failing check, a new
+fixable vulnerability or a new finding to assess shows up before a release does.
 
 The container's base image is pinned by digest in the `Dockerfile`'s `FROM` line and used
 unmodified. `BASE_IMAGE` repeats the reference for the image's labels and
@@ -144,14 +146,25 @@ the digest is old, update the digest:
 3. Record the check in an issue labelled `re-evaluation`, with the old and new digests and
    the result of each condition, and link it from the pull request before it is merged.
 
+## Findings without a fix
+
 The image's vulnerability gate fails only on a vulnerability of severity high or above that
-has a fix. Findings without a fix, mostly in the base image's Debian packages, are accepted
-until Debian ships a fix: each release attaches the full Grype report, and the quarterly
-`re-evaluation` issue reviews them. The libraries in `numpy.libs` are listed in the image
-SBOM under their file names and without a version on purpose. Their files carry no version,
-and Grype would match a package without a version to every advisory for its name, so it
-matches none to them; their advisories (OpenBLAS, libgfortran, libquadmath) are checked by
-hand in the same issue, for the NumPy version in `docker/requirements.txt`.
+has a fix. Findings without a fix are mostly in the base image's Debian packages. Assess
+each one of severity high or above before the first release that ships it, in the base
+image's evaluation issue or in an issue labelled `re-evaluation`:
+
+- When the image does not contain or never runs the vulnerable code, record it as not
+  affected, with the reason: for example a command that the image never runs, a function
+  that no file in the image calls, or an installed version outside the affected range.
+- Otherwise accept it only until a stated date, no later than the next quarterly
+  re-evaluation, and assess it again by then.
+
+The quarterly `re-evaluation` issue reviews the other findings without a fix. Each release
+attaches the full Grype report. The libraries in `numpy.libs` are listed in the image SBOM
+under their file names and without a version on purpose. Their files carry no version, and
+Grype would match a package without a version to every advisory for its name, so it matches
+none to them; their advisories (OpenBLAS, libgfortran, libquadmath) are checked by hand in
+the quarterly issue, for the NumPy version in `docker/requirements.txt`.
 
 ## Answering a source request
 
