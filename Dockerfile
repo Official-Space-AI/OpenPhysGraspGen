@@ -13,9 +13,12 @@
 FROM docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 ARG BASE_IMAGE=docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
-COPY dist/*.whl /tmp/dist/
+# NumPy, PyArrow and PyYAML come at the exact versions in docker/requirements.txt, as
+# wheels, so the image holds what was reviewed and a rebuild of a tag holds the same.
+COPY dist/*.whl docker/requirements.txt /tmp/dist/
 RUN wheel="$(ls /tmp/dist/*.whl)" \
-    && python -m pip install --no-cache-dir --root-user-action=ignore "${wheel}[dataset]" \
+    && python -m pip install --no-cache-dir --root-user-action=ignore --only-binary=:all: \
+        --constraint /tmp/dist/requirements.txt "${wheel}[dataset]" \
     && rm -rf /tmp/dist \
     && groupadd --gid 1000 openpgg \
     && useradd --create-home --uid 1000 --gid 1000 openpgg
