@@ -38,4 +38,6 @@ published once a fix is available.
 
 Every release publishes an SBOM in SPDX and CycloneDX formats together with
 SHA-256 checksums as release assets. Dependency changes in pull requests are
-checked for known vulnerabilities and license policy.
+checked for known vulnerabilities and license policy. Vulnerabilities found in our
+dependencies, and what was done about each, are recorded in
+[docs/oss/vulnerability-log.md](docs/oss/vulnerability-log.md).
