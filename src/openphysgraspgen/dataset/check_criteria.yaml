@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
+# SPDX-License-Identifier: Apache-2.0
+# Acceptance values of the physgraspgen-public 2.0 check, tools/check_dataset.py.
+# metadata.yaml lists this file and the script with their sha256, and a run passes only
+# with both, so a run applies the values the dataset was published with.
+
+scale:
+  # Distinct frames, every frame of every episode whose files are all clean.
+  min_frames: 1000000
+
+metadata:
+  # Disagreements between metadata.yaml and the files.
+  max_mismatches: 0
+  # The dataset's specification, read from its metadata: the ground-truth channels and
+  # the cameras every episode carries, and the licence.
+  required_channels: [rgb, depth, force, stress, deformation_gradient, segmentation]
+  required_cameras: [front, wrist]
+  license: CC-BY-4.0
+
+consistency:
+  # Every frame's layers recorded at the frame's own simulation step, and pressed contact
+  # points that land on the object, each held to min_pass_fraction of the frames.
+  min_pass_fraction: 1.0
+  layers: [rgb, depth, force, stress]
+  # Samples drawn with the tester's seed: sample_frames frames from all frames beside the
+  # every-frame step check, and sample_frames frames from the frames whose contacts press
+  # on the robot for the projection, which fails with fewer such frames than
+  # min_contact_frames.
+  sample_frames: 1000
+  min_contact_frames: 1000
+  # A point passes when the nearest object pixel lies within projection_radius_px of
+  # where it lands, and a camera passes when min_point_fraction of its points in view do.
+  projection_radius_px: 4.0
+  min_point_fraction: 1.0
+  projection_tolerance_provenance: "placeholder: one draw per camera rig measured pressed contacts up to 3.4 px from the object; to be measured on format 2.0 data and agreed"
+  # How far the report's distance distribution is measured; not a criterion.
+  distance_reach_px: 16.0
+
+diversity:
+  # Object types (each episode's object_type), and a table per variable of the episodes'
+  # facts, which must carry every kind in required_fact_kinds. Numbers go into bins bins,
+  # log-spaced when the largest is at least log_bins_min_ratio times the smallest; other
+  # values into rows for their max_categories most frequent.
+  min_object_types: 10
+  required_fact_kinds: [material, placement, lighting, camera]
+  bins: 8
+  log_bins_min_ratio: 100.0
+  max_categories: 30

@@ -10,9 +10,16 @@ from pathlib import Path
 
 import numpy as np
 
-from .check_dataset import video_error, video_tracks
+from .check_dataset import (
+    VIDEO_CRF,
+    VIDEO_ENCODER,
+    VIDEO_MIN_GOP,
+    VIDEO_PRESET,
+    video_error,
+    video_tracks,
+)
 
-ENCODER = "libsvtav1"
+ENCODER = VIDEO_ENCODER
 
 
 @dataclass(frozen=True)
@@ -37,12 +44,18 @@ class VideoSpec:
                 f"encoder must be {ENCODER}, whose crf, gop and preset the video "
                 f"record states; got {self.encoder!r}"
             )
-        if not 1 <= self.crf <= 63:
-            raise ValueError("crf must be between 1 and 63")
-        if self.gop < 2:
-            raise ValueError("gop must be at least 2")
-        if not 0 <= self.preset <= 11:
-            raise ValueError("preset must be between 0 and 11")
+        for key in ("crf", "gop", "preset"):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{key} must be an integer, got {value!r}")
+        if not VIDEO_CRF[0] <= self.crf <= VIDEO_CRF[1]:
+            raise ValueError(f"crf must be between {VIDEO_CRF[0]} and {VIDEO_CRF[1]}")
+        if self.gop < VIDEO_MIN_GOP:
+            raise ValueError(f"gop must be at least {VIDEO_MIN_GOP}")
+        if not VIDEO_PRESET[0] <= self.preset <= VIDEO_PRESET[1]:
+            raise ValueError(
+                f"preset must be between {VIDEO_PRESET[0]} and {VIDEO_PRESET[1]}"
+            )
 
     def record(self) -> dict[str, object]:
         """The encoder settings, which every episode of a dataset shares."""
