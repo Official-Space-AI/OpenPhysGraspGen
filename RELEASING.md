@@ -201,7 +201,7 @@ To produce the source for an image, by tag or digest:
 5. Send the files or a link to them, and keep the request and the answer.
 
 Publishing these sources next to each image, so that the written offer is only a backup,
-is planned.
+is planned in #73.
 
 ## One-time setup
 
