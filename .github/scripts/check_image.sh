@@ -7,10 +7,11 @@
 #   sh .github/scripts/check_image.sh IMAGE
 #
 # The Image workflow runs it on every image it builds, the release's included. It fails
-# unless the Dockerfile's FROM line and BASE_IMAGE name the same base image and the
-# image's label names it too, the notice is in the image, the CLI and the dataset extra
-# work, the image runs as a numeric user other than root, and no FFmpeg file is in the
-# image: the FFmpeg evaluation covers running a user's own FFmpeg, not shipping one.
+# unless the Dockerfile's FROM line and BASE_IMAGE name the same base image, the image's
+# label names it too, BASE_DOCKERFILE is the Dockerfile that built that base image, the
+# notice is in the image, the CLI and the dataset extra work, the image runs as a numeric
+# user other than root, and no FFmpeg file is in the image: the FFmpeg evaluation covers
+# running a user's own FFmpeg, not shipping one.
 set -eu
 
 image=$1
@@ -24,6 +25,18 @@ from=$(sed -n 's/^FROM //p' Dockerfile)
 arg=$(sed -n 's/^ARG BASE_IMAGE=//p' Dockerfile)
 { [ -n "$from" ] && [ "$from" = "$arg" ]; } ||
   fail "FROM ($from) and ARG BASE_IMAGE ($arg) in the Dockerfile must name the same image"
+# NOTICE.container links the docker-library/python Dockerfile that built the base image.
+# The base image's linux/amd64 manifest names it in its source annotation, as
+# https://github.com/docker-library/python.git#<commit>:<directory>.
+source=$(docker buildx imagetools inspect "$from" --format '{{json .Manifest}}' |
+  jq -r '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")
+    | .annotations["org.opencontainers.image.source"] // empty')
+ref=${source#*#}
+expected="${source%%#*}"
+expected="${expected%.git}/blob/${ref%%:*}/${ref#*:}/Dockerfile"
+dockerfile=$(sed -n 's/^ARG BASE_DOCKERFILE=//p' Dockerfile)
+{ [ -n "$source" ] && [ "$dockerfile" = "$expected" ]; } ||
+  fail "ARG BASE_DOCKERFILE ($dockerfile) must be $expected, from the base image's source annotation ($source)"
 label=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.base.name"}}' "$image")
 [ "$label" = "$from" ] || fail "the image's base.name label is '$label', not '$from'"
 docker run --rm --entrypoint test "$image" -s /usr/share/doc/openphysgraspgen/NOTICE.container ||

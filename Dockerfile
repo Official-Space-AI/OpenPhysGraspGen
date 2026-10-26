@@ -12,6 +12,10 @@
 # .github/scripts/check_image.sh fails when the two differ.
 FROM docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 ARG BASE_IMAGE=docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
+# The docker-library/python Dockerfile that built the base image, at the commit that the
+# org.opencontainers.image.source annotation of its linux/amd64 manifest names, for
+# NOTICE.container. check_image.sh fails when it does not match that annotation.
+ARG BASE_DOCKERFILE=https://github.com/docker-library/python/blob/2a3b794c223ab067d122719541cdd54a068732a5/3.12/slim-trixie/Dockerfile
 
 # NumPy, PyArrow and PyYAML come at the exact versions in docker/requirements.txt, as
 # wheels, so the image holds what was reviewed and a rebuild of a tag holds the same.
@@ -47,17 +51,18 @@ RUN printf '%s\n' \
     "  Readline. The official image compiles it, without changes, from the source release" \
     "  https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" \
     "  with the Dockerfile at" \
-    "  https://github.com/docker-library/python/blob/master/3.12/slim-trixie/Dockerfile" \
-    "  (its history has the revision that built this image)." \
+    "  ${BASE_DOCKERFILE}" \
     "- The GCC runtime libraries that the NumPy wheel bundles in numpy.libs: libgfortran," \
     "  GPL-3.0-or-later with the GCC Runtime Library Exception 3.1, and libquadmath," \
     "  LGPL-2.1-or-later. Their source is part of GCC (https://gcc.gnu.org)." \
     "" \
-    "For three years after an image is released we also provide, to anyone who asks, the" \
-    "corresponding source of any component in it under the GPL, the LGPL, the MPL-2.0 or" \
-    "another license that requires source availability, including the CPython build and" \
-    "the GCC runtime libraries above: write to oss.spaceai@gmail.com with the image tag" \
-    "and the component names." \
+    "Written offer: for at least three years after we last distribute this image, SpaceAI" \
+    "(주식회사 스페이스에이아이) will give anyone who asks a complete machine-readable copy" \
+    "of the corresponding source of any component of this image under the GPL, the LGPL," \
+    "the MPL-2.0 or another license that requires source availability, the CPython build" \
+    "and the GCC runtime libraries above included, for no more than the cost of physically" \
+    "performing the distribution. Write to oss.spaceai@gmail.com with the image tag or" \
+    "digest and the components you need." \
     > /usr/share/doc/openphysgraspgen/NOTICE.container
 
 LABEL org.opencontainers.image.title="OpenPhysGraspGen" \
