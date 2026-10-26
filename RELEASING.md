@@ -35,7 +35,11 @@ because that is the import name of the project's internal solver package (#28).
 
 ## Verifying a release
 
+Download the assets from the release page into one folder, then check the checksums and
+the build provenance:
+
 ```sh
+sha256sum -c SHA256SUMS --ignore-missing
 gh attestation verify openphysgraspgen-1.0.0rc1-py3-none-any.whl --repo Official-Space-AI/OpenPhysGraspGen
 ```
 
