@@ -76,5 +76,6 @@ jobs:
       - name: Run the tests and the CLI against the installed wheel
         run: |
           "$RUNNER_TEMP/wheel-env/bin/python" -c "import openphysgraspgen; assert 'site-packages' in openphysgraspgen.__file__, openphysgraspgen.__file__"
+          "$RUNNER_TEMP/wheel-env/bin/python" -c "import importlib.resources; assert importlib.resources.files('openphysgraspgen').joinpath('py.typed').is_file()"
           "$RUNNER_TEMP/wheel-env/bin/python" -m pytest -p no:cacheprovider tests
           "$RUNNER_TEMP/wheel-env/bin/openphysgraspgen" > /dev/null

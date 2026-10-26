@@ -20,6 +20,7 @@ path = [
     "REUSE.toml",
     "SECURITY.md",
     "SUPPORT.md",
+    "src/openphysgraspgen/py.typed",
     "docs/**",
     "pyproject.toml",
 ]
