@@ -153,22 +153,26 @@ the digest is old, update the digest:
 ## Findings without a fix
 
 The image's vulnerability gate fails only on a vulnerability of severity high or above that
-has a fix. Findings without a fix are mostly in the base image's Debian packages. Assess
-each one of severity high or above before the first release that ships it, in the base
-image's evaluation issue or in an issue labelled `re-evaluation`:
+has a fix. Findings without a fix are mostly in the base image's Debian packages. Decide
+the action on each within a day of finding it for severity critical, a week for high, a
+month for medium and three months below. Assess each one of severity high or above also
+before the first release that ships it, in the base image's evaluation issue or in an
+issue labelled `re-evaluation`:
 
 - When the image does not contain or never runs the vulnerable code, record it as not
   affected, with the reason: for example a command that the image never runs, a function
   that no file in the image calls, or an installed version outside the affected range.
 - Otherwise accept it only until a stated date, no later than the next quarterly
-  re-evaluation, and assess it again by then.
+  re-evaluation, and assess it again by then. The project lead approves the acceptance
+  in the issue, or SpaceAI's CEO when the project lead proposed it.
 
-The quarterly `re-evaluation` issue reviews the other findings without a fix. Each release
-attaches the full Grype report. The libraries in `numpy.libs` are listed in the image SBOM
-under their file names and without a version on purpose. Their files carry no version, and
-Grype would match a package without a version to every advisory for its name, so it matches
-none to them; their advisories (OpenBLAS, libgfortran, libquadmath) are checked by hand in
-the quarterly issue, for the NumPy version in `docker/requirements.txt`.
+Record the decisions on the lower findings in an issue labelled `re-evaluation`; the
+quarterly one reviews all findings without a fix again. Each release attaches the full
+Grype report. The libraries in `numpy.libs` are listed in the image SBOM under their file
+names and without a version on purpose. Their files carry no version, and Grype would match
+a package without a version to every advisory for its name, so it matches none to them;
+their advisories (OpenBLAS, libgfortran, libquadmath) are checked by hand in the quarterly
+issue, for the NumPy version in `docker/requirements.txt`.
 
 ## Answering a source request
 
