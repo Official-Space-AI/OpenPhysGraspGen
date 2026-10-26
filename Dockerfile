@@ -4,17 +4,21 @@
 # The release image: the published wheel, with its dataset extra, on the official Python
 # image. The base image is used unmodified and pinned by digest; its Debian packages keep
 # their own licenses. The image SBOM attached to each GitHub release lists every package.
-# Build it from a built wheel: python -m build, then docker build .
+# Build it from a built wheel: python -m build --wheel, then
+# docker build --platform linux/amd64 .
+#
+# The base image is written out in FROM so that Dependabot can propose a new digest.
+# BASE_IMAGE repeats it for the label and NOTICE.container, and
+# .github/scripts/check_image.sh fails when the two differ.
+FROM docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 ARG BASE_IMAGE=docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
-
-FROM ${BASE_IMAGE}
-ARG BASE_IMAGE
 
 COPY dist/*.whl /tmp/dist/
 RUN wheel="$(ls /tmp/dist/*.whl)" \
     && python -m pip install --no-cache-dir --root-user-action=ignore "${wheel}[dataset]" \
     && rm -rf /tmp/dist \
-    && useradd --create-home --uid 1000 openpgg
+    && groupadd --gid 1000 openpgg \
+    && useradd --create-home --uid 1000 --gid 1000 openpgg
 
 COPY LICENSE NOTICE /usr/share/doc/openphysgraspgen/
 RUN printf '%s\n' \
@@ -58,6 +62,7 @@ LABEL org.opencontainers.image.title="OpenPhysGraspGen" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="${BASE_IMAGE}"
 
-USER openpgg
+# A numeric user, so that Kubernetes runAsNonRoot can tell it is not root.
+USER 1000:1000
 WORKDIR /home/openpgg
 ENTRYPOINT ["openphysgraspgen"]
