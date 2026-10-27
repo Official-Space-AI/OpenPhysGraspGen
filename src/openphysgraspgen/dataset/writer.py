@@ -42,7 +42,7 @@ class DatasetSpec:
     recorded_fps: int
     image_size: Mapping[str, tuple[int, int]] = field(default_factory=dict)
     channels: tuple[str, ...] = fmt.CHANNELS
-    license: str = "CC-BY-4.0"
+    license: str = "CC-BY-NC-4.0"
     video: VideoSpec = field(default_factory=VideoSpec)
     frames_per_row_group: int = 32
     zstd_level: int = 3

@@ -130,7 +130,7 @@ PhysGraspGen is developed as open core.
 | Part | Where | License |
 |---|---|---|
 | Library (this repository) | GitHub | Apache-2.0 |
-| Grasp dataset | Hugging Face Hub (with `1.0.0rc1`) | CC-BY-4.0 |
+| Grasp dataset | Hugging Face Hub (with `1.0.0rc1`) | CC-BY-NC-4.0 |
 | Benchmarks and reproduction scripts | This repository (PG-T1 with `1.0.0rc1`, the rest with `1.0.0`) | Apache-2.0 |
 | High-precision solver core | Not published | Commercial |
 
@@ -158,4 +158,4 @@ decides what, and how releases are approved, is in [GOVERNANCE.md](GOVERNANCE.md
 ## License
 
 Code is released under the [Apache License 2.0](LICENSE). The dataset is released
-under CC-BY-4.0.
+under [CC-BY-NC-4.0](https://creativecommons.org/licenses/by-nc/4.0/).

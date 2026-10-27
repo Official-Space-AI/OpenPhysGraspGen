@@ -57,7 +57,7 @@ GITATTRIBUTES = """\
 """
 
 
-def card_front_matter(license: str = "CC-BY-4.0") -> str:
+def card_front_matter(license: str = "CC-BY-NC-4.0") -> str:
     """The YAML front matter that the dataset card, README.md, starts with.
 
     It declares the frames and the trajectories as two configs, because the Hugging

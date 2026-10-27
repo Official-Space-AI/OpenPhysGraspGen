@@ -547,7 +547,7 @@ PUBLISHED = {
             "segmentation",
         ],
         "required_cameras": ["front", "wrist"],
-        "license": "CC-BY-4.0",
+        "license": "CC-BY-NC-4.0",
     },
     "consistency": {
         "min_pass_fraction": 1.0,
