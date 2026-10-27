@@ -924,9 +924,13 @@ def test_no_checksums_warns_and_fails(root, capsys):
 
 
 def test_the_environment_is_checked(monkeypatch):
-    monkeypatch.setattr(fmt.pa, "__version__", "16.1.0")
-    with pytest.raises(fmt.CheckError, match="the check needs PyArrow 17.0 or newer; "):
+    monkeypatch.setattr(fmt.pa, "__version__", "23.0.0")
+    with pytest.raises(
+        fmt.CheckError, match="the check needs PyArrow 23.0.1 or newer; this is 23.0.0"
+    ):
         fmt.check_environment()
+    monkeypatch.setattr(fmt.pa, "__version__", "23.0.1")
+    fmt.check_environment()
     monkeypatch.undo()
     monkeypatch.setattr(fmt.np, "__version__", "1.25.2")
     with pytest.raises(fmt.CheckError, match="needs NumPy 1.26 or newer; this is 1.25"):
