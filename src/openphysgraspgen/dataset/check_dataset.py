@@ -17,7 +17,7 @@ The items:
                  specification read from it (channels, cameras, licence, DOI, URL)
     consistency  every frame's layers recorded at its own simulation step, and, on a
                  sample drawn with the tester's seed, pressed contact points projected
-                 into each camera landing on the object's mask
+                 into each camera landing on the mask of the object or the robot
     diversity    the object types, and a distribution table per variable of the facts
 
 Every data file is hashed before any is opened, and only a file whose sha256 is the one
@@ -1413,7 +1413,8 @@ CRITERIA = {
 }
 # The dataset test's own values (docs/dataset/format.md): at least 1,000,000 frames, no
 # mismatch, every frame of both consistency parts, the step part on these four layers
-# and every point a camera sees landing on the object, and at least 10 object types.
+# and every point a camera sees landing on the object or the robot, and at least 10
+# object types.
 # The criteria a dataset publishes may be weaker; the report says so. The test gives no
 # projection radius (4 px is a placeholder until agreed), sample size, specification or
 # fact kinds, so those are not compared.
@@ -3199,6 +3200,9 @@ def check_metadata(
 
 # The segmentation class whose pixels are the object, looked up by name.
 OBJECT_CLASS = "object"
+# The classes whose pixels are the robot, looked up by name: a contact that presses on
+# the robot lands on the object, on the robot part in front of it, or between them.
+ROBOT_CLASSES = ("arm", "gripper")
 
 
 def dataset_cameras(
@@ -3341,9 +3345,10 @@ def step_reasons(
 
 def projection_inputs(
     schema: Any, footer: Mapping[str, Any], cameras: Iterable[str]
-) -> tuple[list[str], int | None, list[str]]:
-    """What a frames file lacks to project its contacts into cameras, the object's mask
-    value and the class names, read by name: the value is never assumed to be 1."""
+) -> tuple[list[str], list[int], list[str]]:
+    """What a frames file lacks to project its contacts into cameras, the mask values of
+    the object and of the robot classes it names, and the class names, read by name: the
+    values are never assumed to be 1, 2 and 3."""
     types = {f.name: f.type for f in schema}
     lacking = []
 
@@ -3372,8 +3377,9 @@ def projection_inputs(
     classes = footer.get("segmentation_classes")
     if not (isinstance(classes, list) and OBJECT_CLASS in classes):
         lacking.append(f"segmentation_classes naming {OBJECT_CLASS!r}")
-        return lacking, None, []
-    return lacking, classes.index(OBJECT_CLASS), [str(c) for c in classes]
+        return lacking, [], []
+    targets = [classes.index(c) for c in (OBJECT_CLASS, *ROBOT_CLASSES) if c in classes]
+    return lacking, targets, [str(c) for c in classes]
 
 
 def _contacts(array: Any) -> tuple[Any, Any, Any, Any]:
@@ -3406,13 +3412,14 @@ def project_points(points: Any, intrinsics: Any, world_to_camera: Any) -> tuple:
         return pix[:, 0] / pix[:, 2], pix[:, 1] / pix[:, 2], cam[:, 2]
 
 
-def object_distances(
-    mask: Any, u: Any, v: Any, z: Any, object_value: int, reach: float
+def target_distances(
+    mask: Any, u: Any, v: Any, z: Any, targets: list[int], reach: float
 ) -> tuple[Any, Any]:
     """Per point, whether it is in view (in front of the camera and inside the image)
-    and its distance from where it lands to the centre of the nearest object pixel,
-    measured out to reach and infinite beyond. The nearest object pixel, not the class
-    of the pixel it lands in: a contact lies between a pad and the object."""
+    and its distance from where it lands to the centre of the nearest pixel whose value
+    is one of targets, measured out to reach and infinite beyond. The nearest such
+    pixel, not the class of the pixel it lands in: a contact lies between a pad and the
+    object, and at a pad's edge the object's own pixels can lie behind the pad."""
     height, width = mask.shape
     with np.errstate(invalid="ignore"):
         in_view = (
@@ -3430,7 +3437,7 @@ def object_distances(
         row, col = int(np.rint(v[j])), int(np.rint(u[j]))
         r0, c0 = max(row - r, 0), max(col - r, 0)
         rows, cols = np.nonzero(
-            mask[r0 : row + r + 1, c0 : col + r + 1] == object_value
+            np.isin(mask[r0 : row + r + 1, c0 : col + r + 1], targets)
         )
         if rows.size:
             d = float(np.hypot(cols + c0 - u[j], rows + r0 - v[j]).min())
@@ -3441,7 +3448,7 @@ def object_distances(
 def project_frame(
     frame: Mapping[str, Any],
     cameras: list[str],
-    object_value: int,
+    targets: list[int],
     classes: list[str],
     radius: float,
     min_points: float,
@@ -3451,9 +3458,10 @@ def project_frame(
 
     Each camera's mask must be of the frame's step and its matrices the format's; a
     camera that sees points passes when min_points of them lie within radius pixels of
-    the object, and the frame passes when a camera sees one and every such camera
-    passes. Each point in view is also counted under the class it lands in, and its
-    depth residual (its depth minus the depth image's) kept, for the report only.
+    the object or the robot (targets), and the frame passes when a camera sees one and
+    every such camera passes. Each point in view is also counted under the class it
+    lands in, and its depth residual (its depth minus the depth image's) kept, for the
+    report only.
     """
     step = frame["sim_step"]
     robot, force, points = frame["contacts"]
@@ -3483,7 +3491,7 @@ def project_frame(
                 }
         mask = frame[f"segmentation.{camera}.mask"]
         u, v, z = project_points(points, k, t)
-        in_view, dist = object_distances(mask, u, v, z, object_value, reach)
+        in_view, dist = target_distances(mask, u, v, z, targets, reach)
         on = in_view & (dist <= radius)
         landing: dict[str, int] = {}
         residuals: list[float] = []
@@ -3502,7 +3510,7 @@ def project_frame(
         per_camera[camera] = {
             "n_points": len(points),
             "n_in_view": int(in_view.sum()),
-            "n_on_object": int(on.sum()),
+            "n_within_radius": int(on.sum()),
             "landing": landing,
             "max_distance_px": float(seen.max())
             if seen.size and np.isfinite(seen).all()
@@ -3515,14 +3523,14 @@ def project_frame(
         }
     seen_by = {c: r for c, r in per_camera.items() if r["n_in_view"]}
     ok = bool(seen_by) and all(
-        r["n_on_object"] >= min_points * r["n_in_view"] for r in seen_by.values()
+        r["n_within_radius"] >= min_points * r["n_in_view"] for r in seen_by.values()
     )
     status = "pass" if ok else ("not_in_view" if not seen_by else "off_object")
     reason = {
         "pass": None,
         "not_in_view": "no camera sees the pressed contact points",
         "off_object": f"pressed contact points lie more than {radius:g} px from the "
-        "object",
+        "object and the robot",
     }[status]
     return {
         "status": status,
@@ -3568,7 +3576,7 @@ def _project_file(
     rec: DataFile,
     frames: list[int],
     cameras: list[str],
-    inputs: tuple[int, list[str]],
+    inputs: tuple[list[int], list[str]],
     judge: tuple[float, float, float],
 ) -> list[dict[str, Any]]:
     """project_frame for a file's sampled frames, the file opened once and only the row
@@ -3671,7 +3679,7 @@ def check_consistency(
 ) -> dict[str, Any]:
     """Every frame's layers recorded at its own step, and, on a sample drawn with the
     tester's seed from the frames whose contacts press on the robot, those contact
-    points landing on the object in each camera. Both parts must reach
+    points landing on the object or the robot in each camera. Both parts must reach
     min_pass_fraction; a file without a frame count, or listed and missing, fails both,
     and its stated frames stay in the count."""
     fraction = criteria["min_pass_fraction"]
@@ -3740,7 +3748,7 @@ def check_consistency(
     )
 
     unavailable: dict[str, list[str]] = {e["file"]: e["reasons"] for e in no_count}
-    plan: dict[str, tuple[list[str], tuple[int, list[str]]]] = {}
+    plan: dict[str, tuple[list[str], tuple[list[int], list[str]]]] = {}
     n_candidates = 0
 
     def candidates() -> Iterator[tuple[str, int]]:
@@ -3751,7 +3759,7 @@ def check_consistency(
             file_cams = file_cameras(rec, cameras)
             try:
                 with _reopen(ds.root, rec) as parquet:
-                    lacking, value, classes = projection_inputs(
+                    lacking, targets, classes = projection_inputs(
                         parquet.schema_arrow, rec.footer or {}, file_cams
                     )
                     if lacking:
@@ -3764,7 +3772,7 @@ def check_consistency(
             except Exception as exc:  # noqa: BLE001, the file is unavailable
                 unavailable[rec.rel] = [_failed(rec, exc)]
                 continue
-            plan[rec.rel] = (file_cams, (value, classes))
+            plan[rec.rel] = (file_cams, (targets, classes))
             n_candidates += int(pressed.size)
             yield from ((rec.rel, int(i)) for i in pressed)
 
@@ -3803,7 +3811,7 @@ def check_consistency(
             for camera, r in got.get("cameras", {}).items():
                 n_points += r["n_points"]
                 n_in_view += r["n_in_view"]
-                n_on += r["n_on_object"]
+                n_on += r["n_within_radius"]
                 per_camera[camera]["landing"].update(r["landing"])
                 per_camera[camera]["n_frames_in_view"] += bool(r["n_in_view"])
             for camera, r in got.get("raw", {}).items():
@@ -3876,7 +3884,7 @@ def check_consistency(
             "statuses": dict(sorted(statuses.items())),
             "n_points_projected": n_points,
             "n_points_in_view": n_in_view,
-            "n_points_on_object": n_on,
+            "n_points_within_radius": n_on,
             "per_camera": cameras_report,
             "cameras_without_points": blind,
             "unavailable_files": unavailable,

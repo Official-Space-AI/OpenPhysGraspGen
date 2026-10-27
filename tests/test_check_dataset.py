@@ -557,8 +557,10 @@ PUBLISHED = {
         "projection_radius_px": 4.0,
         "min_point_fraction": 1.0,
         "projection_tolerance_provenance": (
-            "placeholder: one draw per camera rig measured pressed contacts up to 3.4 px "
-            "from the object; to be measured on format 2.0 data and agreed"
+            "placeholder: two pilots of format 2.0 data (5,877 frames of four object "
+            "types, a sample of 1,000 from each) measured pressed contacts up to 1.07 "
+            "px from the object or the robot; to be measured on the published data and "
+            "agreed"
         ),
         "distance_reach_px": 16.0,
     },
@@ -2802,7 +2804,7 @@ def test_points_beside_the_object_fail_the_projection(scenes):
     proj = projection(report)
     assert proj["statuses"] == {"off_object": 5}
     assert proj["failed_frames"][0]["reason"] == (
-        "pressed contact points lie more than 4 px from the object"
+        "pressed contact points lie more than 4 px from the object and the robot"
     )
     front = proj["per_camera"]["front"]
     assert front["landing_classes"] == {"background": 10}
@@ -2902,8 +2904,40 @@ def test_two_cameras_that_disagree_fail_the_frame(scenes):
     proj = projection(check(scenes("wrist-off", wrist_off)))
     assert proj["statuses"] == {"off_object": 5}
     cameras = proj["failed_frames"][0]["cameras"]
-    assert cameras["front"]["n_on_object"] == cameras["front"]["n_in_view"] == 2
-    assert cameras["wrist"]["n_on_object"] == 0
+    assert cameras["front"]["n_within_radius"] == cameras["front"]["n_in_view"] == 2
+    assert cameras["wrist"]["n_within_radius"] == 0
+
+
+# The first pressed contact moved onto the gripper's pad in both cameras, 5 px from the
+# object in the front camera: a pad in front of a contact hides it.
+ON_THE_PAD = [-0.525, 0.02, 1.0]
+
+
+def test_a_point_on_the_robot_that_presses_it_passes(scenes):
+    def on_the_pad(step, spec, n=None):
+        frame = scene_frame(step, spec)
+        frame["force.contact_point_world"][0] = ON_THE_PAD
+        return frame
+
+    proj = projection(check(scenes("pad", on_the_pad)))
+    assert proj["statuses"] == {"pass": 5}
+    front = proj["per_camera"]["front"]
+    assert front["landing_classes"] == {"gripper": 5, "object": 5}
+    assert front["distance_px"]["max"] < 1
+
+
+def test_the_robot_is_found_by_its_class_names(root):
+    for row in range(3):
+        point = contact(0, "point_world", ON_THE_PAD)
+        rewrite(root, APPLE, table=cell("force.contacts", row, point))
+    assert projection(check(root, sample=N_FRAMES))["statuses"] == {"pass": N_FRAMES}
+    # Without a class named gripper, the pad's pixels are no robot's.
+    classes = ["background", "object", "arm", "hand", "support", "prop"]
+    set_footer(root, lambda f: {**f, "segmentation_classes": classes})
+    proj = projection(check(root, sample=N_FRAMES))
+    assert proj["statuses"] == {"off_object": 3, "pass": N_FRAMES - 3}
+    failed = proj["failed_frames"][0]["cameras"]["front"]
+    assert failed["landing"] == {"hand": 1, "object": 1}
 
 
 def test_contacts_that_press_nothing_are_no_candidates(scenes, tmp_path):
