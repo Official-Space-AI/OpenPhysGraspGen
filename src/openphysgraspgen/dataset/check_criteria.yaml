@@ -15,7 +15,7 @@ metadata:
   # the cameras every episode carries, and the licence.
   required_channels: [rgb, depth, force, stress, deformation_gradient, segmentation]
   required_cameras: [front, wrist]
-  license: CC-BY-4.0
+  license: CC-BY-NC-4.0
 
 consistency:
   # Every frame's layers recorded at the frame's own simulation step, and pressed contact

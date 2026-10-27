@@ -1256,7 +1256,7 @@ def test_the_card_front_matter_declares_each_table(tmp_path):
     assert text.startswith("---\n") and text.endswith("---\n")
     header = yaml.safe_load(text.strip("-\n"))
     assert header == {
-        "license": "cc-by-4.0",
+        "license": "cc-by-nc-4.0",
         "configs": [
             {
                 "config_name": "frames",
