@@ -28,6 +28,7 @@ from .pg_t1 import (
     FLOOR_ARMS,
     FORMAT,
     FORMAT_VERSION,
+    LABELS,
     SCORER_ID,
     STAGES,
     TASKS,
@@ -90,13 +91,18 @@ def _cells(
         s: _stage(records, criterion, s) if s in stages else None for s in STAGES
     }
     pop = [r for r in records if _is_decidable(r, criterion)]
-    if len(stages) < len(STAGES):
-        cells["task_score"], cells["task_score_why_null"] = None, "no put-down planned"
+    planned = len(stages) == len(STAGES)
+    if not planned:
+        score, why = None, "no put-down planned"
     elif not pop:
-        cells["task_score"], cells["task_score_why_null"] = None, "no decidable episode"
+        score, why = None, "no decidable episode"
     else:
         rates = [sum(r[criterion][s] is True for r in pop) / len(pop) for s in STAGES]
-        cells["task_score"], cells["task_score_why_null"] = sum(rates) / 3, None
+        score, why = sum(rates) / 3, None
+    cells["task_score"] = score
+    # The lifted row counts every episode, the score only the decidable ones.
+    cells["task_score_n"] = len(pop) if planned else None
+    cells["task_score_why_null"] = why
     last = cells[stages[-1]]
     cells["headline"] = (
         None
@@ -133,6 +139,11 @@ def _common(values: Sequence[Any]) -> Any:
     return first if all(v == first for v in values) else "mixed"
 
 
+def _kept(labels: Sequence[str] | None) -> list[str] | None:
+    """The labels a generation run kept, in the order LABELS lists them."""
+    return None if labels is None else [x for x in LABELS if x in labels]
+
+
 def _task_entry(name: str, records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     task = TASKS[name]
     types: dict[str, list[Mapping[str, Any]]] = {}
@@ -144,7 +155,7 @@ def _task_entry(name: str, records: Sequence[Mapping[str, Any]]) -> dict[str, An
         "placed_rule": task.placed_rule,
         "n_object_types": len(types),
         "population": {
-            "keep_labels": _common([r["keep_labels"] for r in records]),
+            "keep_labels": _common([_kept(r["keep_labels"]) for r in records]),
             "keep_requires_lift": _common([r["keep_requires_lift"] for r in records]),
             "labels": dict(sorted(labels.items(), key=lambda kv: (-kv[1], str(kv[0])))),
         },
@@ -249,6 +260,8 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
     records: list[dict[str, Any]] = []
     refused: list[dict[str, Any]] = []
     episodes: list[dict[str, Any]] = []
+    # The episodes an earlier entry lists: no episode is scored twice.
+    seen: set[tuple[str, str]] = set()
     for entry in entries:
         uid, object_type = entry.get("episode_uid"), entry.get("object_type")
         rel = PurePosixPath(str(entry.get("path")))
@@ -260,6 +273,13 @@ def score_dataset(root: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
                     f"metadata.yaml lists episode_uid {uid!r} and object_type "
                     f"{object_type!r}; both must be strings",
                 )
+            if (object_type, uid) in seen:
+                raise Refused(
+                    "listing",
+                    f"metadata.yaml lists episode {uid!r} of {object_type!r} more "
+                    "than once",
+                )
+            seen.add((object_type, uid))
             if rel.is_absolute() or ".." in rel.parts:
                 raise Refused(
                     "listing", f"{entry.get('path')!r} is not a path under the root"
@@ -385,7 +405,7 @@ def _population(population: Mapping[str, Any], task: Task) -> str:
         return "every episode the generation run made"
     kept = "the episodes the generation run kept"
     if labels is not None:
-        kept += f": labels {', '.join(sorted(labels))}"
+        kept += f": labels {', '.join(labels)}"
     if lift:
         rise = "lifted or rose 5 cm" if task.criterion_id == C_ID else "lifted"
         kept += (
@@ -449,7 +469,7 @@ def _task_text(
             + (
                 _WHY_NULL[cells["task_score_why_null"]]
                 if score is None
-                else f"{score:.3f}"
+                else f"{score:.3f} over {cells['task_score_n']} decidable"
             )
         )
         top = cells["headline"]

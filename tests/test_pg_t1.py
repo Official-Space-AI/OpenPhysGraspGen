@@ -1103,9 +1103,11 @@ def test_a_skipped_lift_leaves_an_episode_without_a_rise_undecided():
     ]
 
 
-def test_an_episode_with_no_usable_row_is_undecided_where_b_cannot_decide():
+@pytest.mark.parametrize("stop", [None, "dropped", "never_lifted"])
+def test_an_episode_with_no_usable_row_is_undecided_where_b_cannot_decide(stop):
+    # Without a row that has both heights, C is not reached whatever the stop.
     rows = [dict(r, finite=False) for r in ramp("search_lift_hold_2s", S2, 0.15)]
-    record = score(rows, block("search_lift_hold_2s", S2))
+    record = score(rows, block("search_lift_hold_2s", S2, stop=stop))
     c, b = record["C"], record["B"]
     assert record["decidable"] == {"C": True, "B": False}
     assert (c["lifted"], c["class"], c["reasons"]) == (
@@ -1235,8 +1237,14 @@ def without_tool_at(rows, at):
         (put_back(drop=True), False, ["descent_not_with_tool"], None),
         (moved_at(put_back(), 440, (0.003, 0.0, 0.0)), False, ["not_at_rest"], None),
         (moved_at(put_back(), 439, (0.003, 0.0, 0.0)), True, [], None),
-        (widened(put_back(), 370, 370, 0.05 + 2e-6), False, ["fell_on_release"], None),
-        (widened(put_back(), 370, 370, 0.05 + 0.5e-6), True, [], None),
+        # The jaws hold 0.05 m wide: a width exactly 1 um wider is no release.
+        (
+            widened(put_back(), 370, 370, math.nextafter(0.05 + 1e-6, 1.0)),
+            False,
+            ["fell_on_release"],
+            None,
+        ),
+        (widened(put_back(), 370, 370, 0.05 + 1e-6), True, [], None),
         (widened(put_back(), 356, 389, 0.12), None, [], "too_few_carried_rows"),
         (
             widened(put_back(), 357, 389, 0.12),
@@ -1302,6 +1310,14 @@ def pressed(rows, at, force):
     ]
 
 
+def bottom_at(rows, at, z):
+    """The rows with the object's lowest point at height z on row at."""
+    return [
+        dict(r, **{"object.bbox_min": (*r["object.bbox_min"][:2], z)}) if i == at else r
+        for i, r in enumerate(rows)
+    ]
+
+
 @pytest.mark.parametrize(
     ("rows", "verdict", "reasons", "fact", "value"),
     [
@@ -1335,6 +1351,16 @@ def pressed(rows, at, force):
         # The force peak is read up to the row the jaws are fully open, 630.
         (pressed(put_down(), 630, 5.0), True, [], "set_down_bench_force_peak_n", 5.0),
         (pressed(put_down(), 631, 5.0), True, [], "set_down_bench_force_peak_n", 0.0),
+        # Let go 3 mm up, the object first comes within 1 mm of its rest height
+        # underneath, 0.0, on row 603, or on row 602 when that row is exactly 1 mm up.
+        (bottom_at(put_down(), 602, 0.001), True, [], "first_touch_frame", 602),
+        (
+            bottom_at(put_down(), 602, math.nextafter(0.001, 1.0)),
+            True,
+            [],
+            "first_touch_frame",
+            603,
+        ),
     ],
 )
 def test_each_put_down_bound(rows, verdict, reasons, fact, value):
@@ -1348,13 +1374,24 @@ def test_each_put_down_bound(rows, verdict, reasons, fact, value):
 
 
 @pytest.mark.parametrize(
-    ("dx", "dy"), [(0.047, 0), (-0.047, 0), (0, 0.047), (0, -0.047)]
+    ("dx", "dy", "verdict", "reasons"),
+    [
+        (0, 0, True, []),
+        (1e-9, 0, False, ["off_target"]),
+        (-1e-9, 0, False, ["off_target"]),
+        (0, 1e-9, False, ["off_target"]),
+        (0, -1e-9, False, ["off_target"]),
+    ],
 )
-def test_the_object_must_end_on_the_mat_on_every_side(dx, dy):
-    # The object ends 8 cm wide around (0.5, 0.15); the mat is 0.154 m wide.
-    target = dict(TARGET, x_m=TARGET["x_m"] + dx, y_m=TARGET["y_m"] + dy)
+def test_the_object_must_end_on_the_mat_on_every_side(dx, dy, verdict, reasons):
+    # The object ends 8 cm wide around (0.5, 0.15), and the mat is as wide: its bounds,
+    # the centroid +/- 0.04, lie on the edges, the mat's centre +/- 0.04. A mat moved a
+    # nanometre leaves the object off it on one side.
+    target = dict(
+        TARGET, x_m=TARGET["x_m"] + dx, y_m=TARGET["y_m"] + dy, half_extent_m=0.04
+    )
     placed = score(put_down(), block(CARRY, CP, place_target=target))["placed_task"]
-    assert (placed["verdict"], placed["reasons"]) == (False, ["off_target"])
+    assert (placed["verdict"], placed["reasons"]) == (verdict, reasons)
 
 
 @pytest.mark.parametrize(
@@ -1389,6 +1426,150 @@ def test_the_10_cm_centroid_bound_is_inclusive():
         judge = {"place_error_tol_m": bound}
         task = block(CARRY_10CM, CP, place_target=target, judge=judge)
         assert score(rows, task)["placed_task"]["verdict"] is verdict
+
+
+def measured(name, times=1.0):
+    """The tolerance a put-down meets exactly: its fact name, times times."""
+    return lambda facts, _: times * facts[name]
+
+
+def centroid_at(rows, i):
+    return rows[i]["object.centroid"]
+
+
+def with_the_tool(rows, first, last):
+    """The rows with the object's centroid at the tool's height on rows first to last."""
+    out = [dict(r) for r in rows]
+    for r in out[first : last + 1]:
+        r["object.centroid"] = (*r["object.centroid"][:2], r["robot.ee_pose"][2])
+    return out
+
+
+# Each tolerance of the two placements is met at the value the episode measures and
+# missed at the float under it.
+@pytest.mark.parametrize(
+    ("rows", "task", "key", "edge", "word"),
+    [
+        (
+            put_down(slip=lambda i: 0.030 * clamp((i - 300) / 120)),
+            CARRY,
+            "carry_slip_tol_m",
+            measured("carry_slip_max_m"),
+            "slipped_in_jaws",
+        ),
+        (
+            put_down(path=dragged(0.003)),
+            CARRY,
+            "place_tol_m",
+            measured("dragged_max_m"),
+            "dragged",
+        ),
+        (
+            put_down(clearance=0.018, slip=lambda i: 0.015 * clamp((i - 400) / 3)),
+            CARRY,
+            "place_release_drop_tol_m",
+            measured("came_down_excess_max_m"),
+            "came_down_fast",
+        ),
+        (
+            put_down(clearance=0.0, path=set_down_fast),
+            CARRY,
+            "set_down_speed_max_m_s",
+            measured("set_down_speed_m_s"),
+            "set_down_too_fast",
+        ),
+        (
+            put_down(clearance=0.015, fall=lambda k: min(0.015, 0.0025 * k)),
+            CARRY,
+            "place_release_drop_tol_m",
+            measured("fall_after_open_m"),
+            "fell_on_release",
+        ),
+        # The push bound is half of place_tol_m.
+        (
+            put_down(shove=pushed(0.011)),
+            CARRY,
+            "place_tol_m",
+            measured("push_after_release_m", 2.0),
+            "pushed_after_release",
+        ),
+        (
+            put_down(wander=nudged(690)),
+            CARRY,
+            "place_rest_radius_m",
+            measured("rest_wander_m"),
+            "not_at_rest",
+        ),
+        # The put-back opens at row 390 and ends at row 449; the object rested at row 0.
+        (
+            put_back(fall=0.02),
+            "lift_hold_place",
+            "place_release_drop_tol_m",
+            lambda _, rows: centroid_at(rows, 390)[2] - centroid_at(rows, 449)[2],
+            "fell_on_release",
+        ),
+        (
+            moved_at(put_back(), 440, (0.003, 0.0, 0.0)),
+            "lift_hold_place",
+            "place_rest_radius_m",
+            lambda _, rows: math.dist(centroid_at(rows, 440), centroid_at(rows, 449)),
+            "not_at_rest",
+        ),
+        (
+            put_back(drift=0.03),
+            "lift_hold_place",
+            "place_tol_m",
+            lambda _, rows: math.dist(centroid_at(rows, 449), centroid_at(rows, 0)),
+            "not_back_at_start",
+        ),
+        # Held at the tool point from the end of the hold to the opening, the object
+        # comes down exactly as fast as the tool.
+        (
+            with_the_tool(put_back(), 354, 390),
+            "lift_hold_place",
+            "place_max_descent_factor",
+            lambda *_: 1.0,
+            "descent_not_with_tool",
+        ),
+    ],
+)
+def test_each_placement_tolerance_is_inclusive(rows, task, key, edge, word):
+    schedule = SCHEDULES[task]
+    facts = score(rows, block(task, schedule))["placed_task"]["facts"]
+    value = edge(facts, rows)
+    for tolerance, verdict, reasons in (
+        (value, True, []),
+        (math.nextafter(value, 0.0), False, [word]),
+    ):
+        task_block = block(task, schedule, judge={key: tolerance})
+        placed = score(rows, task_block)["placed_task"]
+        assert (placed["verdict"], placed["reasons"]) == (verdict, reasons)
+
+
+def test_a_carried_row_counts_as_dragged_only_under_the_drop_tolerance():
+    # The tool drags the object over rows 500 to 599 with its lowest point h over its
+    # rest height. Only the carry is read: the object then falls h after the opening,
+    # which the same key bounds.
+    rows = put_down(path=dragged(0.003))
+    h = rows[550]["object.bbox_min"][2] - rows[0]["object.bbox_min"][2]
+    for tolerance, reasons in ((h, []), (math.nextafter(h, 1.0), ["dragged"])):
+        task = block(CARRY, CP, judge={"place_release_drop_tol_m": tolerance})
+        facts = score(rows, task)["placed_task"]["facts"]
+        assert facts["carried_fail_reasons"] == reasons
+
+
+def test_the_put_back_counts_a_rise_of_exactly_lift_success_m():
+    # The object reaches its full rise at row 119 and keeps it to the end of the hold, at
+    # row 359.
+    rows = put_back()
+    rise = centroid_at(rows, 119)[2] - centroid_at(rows, 0)[2]
+    for threshold, outcome in (
+        (rise, (True, None)),
+        (math.nextafter(rise, 1.0), (None, "internal_lift_not_met")),
+    ):
+        task = block("lift_hold_place", LHP, judge={"lift_success_m": threshold})
+        placed = score(rows, task)["placed_task"]
+        assert (placed["verdict"], placed["why"]) == outcome
 
 
 def test_a_hold_the_recording_cuts_short_leaves_the_put_down_unjudged():
@@ -1702,6 +1883,26 @@ def test_the_listing_must_describe_the_file(tmp_path):
     assert report["episodes"]["unlisted"] == 2
 
 
+def test_an_episode_listed_twice_is_scored_once(tmp_path):
+    write(tmp_path, lift_holds(2))
+    path = tmp_path / "metadata.yaml"
+    meta = yaml.safe_load(path.read_text())
+    trajectories = [f for f in meta["files"] if f["kind"] == "trajectory"]
+    meta["files"].append(dict(trajectories[0]))
+    path.write_text(yaml.safe_dump(meta))
+    report, episodes = score_dataset(tmp_path)
+    assert [(e["episode_uid"], e.get("refused")) for e in episodes] == [
+        ("ep-0", None),
+        ("ep-0", "listing"),
+        ("ep-1", None),
+    ]
+    assert episodes[1]["detail"] == (
+        "metadata.yaml lists episode 'ep-0' of 'apple' more than once"
+    )
+    assert report["tasks"]["lift_hold"]["overall"]["n"] == 2
+    assert report["status"] == "incomplete"
+
+
 def edit_footer(path, **changes):
     """Rewrite a trajectory file with these changes to its footer metadata."""
     meta = json.loads(pq.read_metadata(path).metadata[b"physgraspgen"])
@@ -1796,6 +1997,25 @@ def test_the_table_states_the_population_it_scores(tmp_path):
     assert "population episodes kept under different rules" in lines
 
 
+def test_labels_kept_in_another_order_are_one_population(tmp_path):
+    rows = ramp("lift_hold", LH, 0.15)
+    reordered = block("lift_hold", LH, keep_labels=["fracture", "success", "fracture"])
+    write(
+        tmp_path,
+        [
+            episode("ep-0", rows, block("lift_hold", LH)),
+            episode("ep-1", rows, reordered),
+        ],
+    )
+    report = scored(tmp_path)[0]
+    assert report["tasks"]["lift_hold"]["population"]["keep_labels"] == [
+        "success",
+        "fracture",
+    ]
+    assert "population episodes kept under different rules" not in printed(report)
+    assert "kept: labels success, fracture;" in report_text(report)
+
+
 def test_scores_are_pooled_over_object_types_and_given_per_type(tmp_path):
     write(
         tmp_path,
@@ -1833,11 +2053,21 @@ def test_the_task_score_is_taken_over_the_decidable_episodes(tmp_path):
     c, b = table["C"], table["B"]
     assert (b["lifted"]["of_all"], b["held"]["undecidable"]) == (1.0, 1)
     assert b["task_score"] == c["task_score"] == 1.0
+    assert (b["task_score_n"], c["task_score_n"]) == (1, 2)
+    lines = printed(report)
     # B's held: 1 of 1 attempted and 1 of the 1 decidable episode; C's: 2 of 2.
-    assert "held 1/1 1.000 [0.207, 1.000] 1/1 1.000 [0.207, 1.000]" in printed(report)
+    assert "held 1/1 1.000 [0.207, 1.000] 1/1 1.000 [0.207, 1.000]" in lines
+    # B's lifted row counts both episodes, its score only the decidable one.
+    assert "lifted 2/2 1.000 [0.342, 1.000] 2/2 1.000 [0.342, 1.000]" in lines
+    assert "task score 1.000 over 1 decidable" in lines
+    assert "task score 1.000 over 2 decidable" in lines
     write(tmp_path / "short", [shorter])
     b = scored(tmp_path / "short")[0]["tasks"]["lift_hold_place"]["overall"]["B"]
-    assert (b["task_score"], b["task_score_why_null"]) == (None, "no decidable episode")
+    assert (b["task_score"], b["task_score_n"], b["task_score_why_null"]) == (
+        None,
+        0,
+        "no decidable episode",
+    )
     assert b["headline"] is None
 
 
@@ -1857,11 +2087,12 @@ def test_a_task_without_a_hold_reports_lifted_alone(tmp_path):
     assert "held" not in records["ep-0"]["C"] and "placed" not in records["ep-0"]["B"]
     for x in ("C", "B"):
         cells = report["tasks"]["pick"]["overall"][x]
-        assert (cells["held"], cells["placed"], cells["task_score"]) == (
-            None,
-            None,
-            None,
-        )
+        assert (
+            cells["held"],
+            cells["placed"],
+            cells["task_score"],
+            cells["task_score_n"],
+        ) == (None, None, None, None)
         assert cells["task_score_why_null"] == "no put-down planned"
         assert (cells["headline"]["stage"], cells["headline"]["of_all"]) == (
             "lifted",

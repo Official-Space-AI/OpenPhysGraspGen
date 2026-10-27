@@ -51,6 +51,17 @@ pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
 openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 ```
 
+[공개 데이터셋 형식](docs/dataset/format.md)의 데이터셋으로 PG-T1 벤치마크를 채점합니다.
+`dataset` extra(`pip install "openphysgraspgen[dataset]"`)가 필요합니다.
+
+```bash
+openphysgraspgen benchmark pg-t1 path/to/dataset --json pg-t1.json
+```
+
+태스크마다 표를 출력하고, 보고서는 `pg-t1.json`에, 에피소드별 기록은 같은 폴더의
+`pg-t1.episodes.jsonl`에 저장합니다. 채점 규칙은
+[docs/benchmark/pg-t1.md](docs/benchmark/pg-t1.md)에 있습니다.
+
 구성방정식을 직접 계산하는 예시와 Newton 접촉 라벨 기록 예시는
 [영문 README](README.md#quick-start)에 있습니다.
 

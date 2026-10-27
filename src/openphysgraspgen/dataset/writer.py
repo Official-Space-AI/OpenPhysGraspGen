@@ -840,8 +840,9 @@ class GraspDataRecorder:
         one value that is not null, and its integers fit int64. source_n_frames is the
         generator's frame count, which n_steps equals when the trajectory holds every
         step it recorded; it is required, None only when the count is unknown, and at
-        least n_steps. task is free-form until the PG-T1 scorer defines its keys; task,
-        header and the provenance records are mappings or None.
+        least n_steps. For PG-T1, task is the task block that docs/benchmark/pg-t1.md
+        defines, whose keys the writer does not check; task, header and the provenance
+        records are mappings or None.
         """
         for key, value in (("episode_uid", episode_uid), ("object_type", object_type)):
             if not isinstance(value, str):

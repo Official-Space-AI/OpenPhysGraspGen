@@ -128,7 +128,9 @@ anyway, it must still have its type.
 
 `judge` must hold the numbers the generator judged with, from the same sources, so that the
 scorer's put-down is the generator's. JSON has no NaN, so a fact the generator could not measure is
-written as null.
+written as null. The stored `agreement` and `place` records, and the trajectory the scorer
+recomputes them from, must be written as the generator recorded them, in float64, not read back
+from a float32 copy: E1 and E4 compare their entries exactly with the scorer's.
 
 ### Tasks
 
@@ -153,7 +155,7 @@ An episode that breaks one of these rules is refused: it is not scored, its rule
 
 | Word | Rule |
 |---|---|
-| `listing` | `metadata.yaml` lists the episode's uid and object type as strings and its path under the dataset's root, and the file holds that episode of that object type |
+| `listing` | `metadata.yaml` lists the episode's uid and object type as strings and its path under the dataset's root, no earlier entry lists that uid and object type, and the file holds that episode of that object type |
 | `unreadable` | the trajectory file and its footer can be read |
 | `format` | the footer says `physgraspgen-public` 2.0 |
 | `label` | the footer's `label` is `success`, `fracture`, `fail` or `unknown` |
@@ -165,8 +167,9 @@ An episode that breaks one of these rules is refused: it is not scored, its rule
 | `task_block` | the task block follows the tables above |
 | `phase_row` | every row's waypoint is a waypoint of the plan and its phase is that waypoint's phase |
 
-A trajectory file under `trajectories/` that `metadata.yaml` does not list is not scored and is
-counted under `unlisted`.
+An episode that `metadata.yaml` lists more than once is scored at most once, from its first
+entry. A trajectory file under `trajectories/` that `metadata.yaml` does not list is not scored and
+is counted under `unlisted`.
 
 ## The rules
 
@@ -201,9 +204,10 @@ float64 values, since a float32 round trip can move a rise by a few 1e-9 m eithe
 first row that is up, and the window is rows k to k + 120 - 1; a row without both heights is
 skipped.
 
-- No row is up: false when the generator stopped the episode as never lifted or as dropped, false
-  when the lift phase recorded every row it was scheduled for (`never_crossed`), and not reached
-  otherwise (`incomplete`).
+- No row has both heights: not reached (`incomplete`), whatever the `stop_reason`.
+- Some row has both heights but none is up: false when the generator stopped the episode as never
+  lifted or as dropped, false when the lift phase recorded every row it was scheduled for
+  (`never_crossed`), and not reached otherwise (`incomplete`).
 - A row of the window is not up: false, `dipped_in_window` when the centroid of some row of the
   window is under 5 cm, else `still_supported` (only lowest points under 5 mm). A recorded dip
   decides the window even when the window is cut short.
@@ -252,16 +256,20 @@ rested at the start. Each failed condition gives its word: `never_released`,
 **The put-down** (the two tasks that carry). The internal hold is the task's own (4.0 s or 3.0 s)
 from the crossing of `lift_success_m`, read as B reads its window; when it is not true, `placed` is
 not reached. The jaws open on the first row of the first run of `open_ramp_frames` rows whose
-commanded width exceeds the widest width of that hold by more than `grip_force_open_deadband_m`.
+commanded width exceeds the widest width of that hold by more than `grip_force_open_deadband_m`,
+and they are fully open on the row after that run, `open_ramp_frames` rows after the opening.
 
-The carry runs from the crossing to the opening (to the end when the jaws never open). It is judged
-when the episode stopped on a drop, or when the carry phase is complete and the jaws opened or the
-place phase is complete. It fails when the drop stop came before any opening (`dropped_in_carry`),
-when the object moved more than `carry_slip_tol_m` in the jaws (`slipped_in_jaws`: its offset from
-the tool point, read in the reached tool frame as the position along the jaw axis and the distance
-from it), or when a row whose lowest point is less than `place_release_drop_tol_m` over its rest
-height lies more than `place_tol_m` in plan from where the object is at the opening, or at the last
-carried row when the jaws never open (`dragged`). A failed carry is a failed placement.
+The carried rows are the rows with a centroid from the crossing to the row before the opening, or to
+the last row when the jaws never open. The carry is judged when the episode stopped on a drop, or
+when the carry phase is complete and the jaws opened or the place phase is complete. It fails when
+the drop stop came before any opening (`dropped_in_carry`), when the object slipped more than
+`carry_slip_tol_m` in the jaws (`slipped_in_jaws`), or when a carried row whose lowest point is less
+than `place_release_drop_tol_m` over its rest height lies more than `place_tol_m` in plan from where
+the object is at the opening, or at the last carried row when the jaws never open (`dragged`). A
+failed carry is a failed placement. The slip is read from the object's offset from the tool point in
+the reached tool frame: a is its position along the jaw axis, the tool's y axis, and r its distance
+from that axis. With a0 and r0 those of the first carried row with a tool pose, the slip is the
+largest `hypot(a - a0, r - r0)` over the carried rows with one.
 
 After a good carry, and when both place waypoints and both retreat waypoints are complete, the
 judged span runs from the opening for `opening_to_end_frames` rows, clamped to the recording. With
@@ -275,7 +283,7 @@ object is placed when all seven checks pass:
 | `set_down_too_fast` | over the 3 rows before it first came within 1 mm of its rest height underneath, it came down faster than `set_down_speed_max_m_s` |
 | `fell_on_release` | it fell more than `place_release_drop_tol_m` from the opening to the final row |
 | `pushed_after_release` | it moved more than half of `place_tol_m` in plan from the opening to the final row |
-| `still_touching` | a robot contact remains after the row the jaws are fully open, or no row follows it |
+| `still_touching` | a robot contact remains on a row of the span after the row the jaws are fully open, or the span has no row after it |
 | `not_at_rest` | over the last `rest_window_frames` rows of the span it wanders more than `place_rest_radius_m` from its last position |
 
 A jaw that never opens fails with `never_opened`. When the placement cannot be judged, `placed`
@@ -285,7 +293,8 @@ is not reached and the record says why: `internal_lift_not_met`, `internal_hold_
 `empty_rest_window`, which no generator recording reaches; for the put-back `no_usable_rows`,
 `fewer_than_10_rows_after_hold`, `no_grip_width`, `ee_pose_missing` or `too_few_carried_rows`.
 The record of a put-down also holds the facts the generator records for it, under the generator's
-names.
+names, among them `set_down_bench_force_peak_n`, the highest bench force from the crossing to the
+row the jaws are fully open.
 
 ### Decidable windows
 
@@ -326,10 +335,12 @@ whose window is decidable):
 - `of_all` is true over all of them: the unconditional rate.
 - Each comes with its Wilson 95 % interval, z = 1.959963984540054.
 - The task score is the mean of the three `of_all` rates over the episodes with a decidable window.
-  Rates over all are used because their mean moves with every stage: with conditional rates, a
-  grasp that lifts 10 of 100 objects and holds and places all 10 would score 0.70 instead of 0.10.
-  It is null with its reason for a task that places nothing or has no episode with a decidable
-  window, and it carries no interval: it is not a proportion.
+  `task_score_n` counts those episodes, and the table prints it after the score ("0.694 over 12
+  decidable"), since the `lifted` row counts every episode. Rates over all are used because their
+  mean moves with every stage: with conditional rates, a grasp that lifts 10 of 100 objects and
+  holds and places all 10 would score 0.70 instead of 0.10. It is null with its reason for a task
+  that places nothing or has no episode with a decidable window, and it carries no interval: it is
+  not a proportion. For a task that places nothing, `task_score_n` is null too.
 - The headline is the last planned stage over all with its interval: `placed`, the fraction of
   episodes lifted, held and placed, for a task that places, else `held`, else `lifted`.
 - The failure breakdown counts each class and each class's words; an episode with several words
@@ -337,8 +348,10 @@ whose window is decidable):
 - The population states which episodes the dataset holds: the labels the generation run kept and
   whether it kept only lifted episodes. A table over such a corpus is conditional on the lift: on
   every task but `search_lift_hold_2s`, with a generator threshold of at least 12 cm, its B
-  `lifted` rate is 1.0 by construction. The labels of the scored episodes are counted; damage
-  itself is not part of PG-T1.
+  `lifted` rate is 1.0 by construction. `keep_labels` is compared as a set and listed in the order
+  `success`, `fracture`, `fail`, `unknown`; it and `keep_requires_lift` are `mixed` when the task's
+  episodes disagree. The labels of the scored episodes are counted; damage itself is not part of
+  PG-T1.
 
 A cell no episode can decide is null and prints as "not planned", "not decidable" or "not
 reached", never as 0. Floor-arm baselines are scored the same way and reported apart, under
@@ -351,11 +364,11 @@ rule (`refused`) and why (`detail`), `unlisted`, `unlisted_paths`), `tasks`, `fl
 and `status`. Under `tasks`, each task has its `criterion_id`, `placed_rule` (`put-back`, `put-down`
 or null), `n_object_types`, `population`, `overall` and `by_object_type`; each table holds `n` and,
 for C and B, the three stages (`planned`, `undecidable`, `true`, `false`, `not_reached`,
-`of_attempted`, `of_all` and the two intervals), `task_score`, `task_score_why_null`, `headline` and
-`failures` (`counts`, `of_all`, `reasons`). Each line of the episodes file is one episode, ordered
-by object type, then episode uid: its verdicts, class and words per criterion, C's agreement record,
-B's crossing and window end, the placement verdict with its facts, and its check, or for a refused
-episode its rule and why.
+`of_attempted`, `of_all` and the two intervals), `task_score`, `task_score_n`,
+`task_score_why_null`, `headline` and `failures` (`counts`, `of_all`, `reasons`). Each line of the
+episodes file is one episode, ordered by object type, then episode uid: its verdicts, class and
+words per criterion, C's agreement record, B's crossing and window end, the placement verdict with
+its facts, and its check, or for a refused episode its rule and why.
 
 The output is deterministic: no randomness, episodes ordered by object type, then episode uid, and
 numbers written as the shortest float64 strings that read back exactly.
@@ -405,6 +418,10 @@ and no check failed, `incomplete` when an episode was refused or a file is not l
 - Under `search_lift_hold_carry_place_10cm` the plan keeps the object airborne for the task's 3.0 s,
   and B's 241-row window fits it by only a few rows, so B's `held` and `placed` there partly measure
   the schedule.
+- Under `lift_hold_retry` the first rise in the recording decides B and C, so the task's rates
+  measure the first attempt that lifts the object, not the recovery: when that attempt drops the
+  object inside a criterion's window, `held` is false under that criterion whatever the second
+  attempt does.
 - `frames_per_waypoint` is the configured schedule. Under a timing perturbation the waypoints before
   the close fly more or fewer rows; the rows before the hold then move with the whole plan, so the
   decidable windows stay as computed, and the scorer refuses a block that scales a later phase.
