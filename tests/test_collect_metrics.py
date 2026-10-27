@@ -136,6 +136,20 @@ def test_a_running_month_stops_at_now(api):
     assert row["releases"] == 0
 
 
+def test_an_answer_after_7_days_still_counts_as_waiting(api):
+    # Answered 9 days after it was opened: in the median, and also left waiting.
+    api[f"/repos/{REPO}/issues?state=all"].append(
+        item(6, "visitor", "2026-10-10T00:00:00Z")
+    )
+    api[f"/repos/{REPO}/issues/6/comments"] = [
+        {"user": user("lead"), "created_at": "2026-10-19T00:00:00Z"}
+    ]
+    end = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    row = metrics.collect(fake(api), REPO, "2026-10", now=end)
+    assert row["median_first_response_hours"] == 110.5
+    assert row["items_without_response_7d"] == 2
+
+
 def test_a_row_replaces_the_same_month(tmp_path):
     path = tmp_path / "kpi.csv"
     empty = dict.fromkeys(metrics.FIELDS, 0)

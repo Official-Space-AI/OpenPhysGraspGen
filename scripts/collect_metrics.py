@@ -136,7 +136,9 @@ def collect(
         responded = first_response(fetch, repo, item)
         if responded is not None and responded < cutoff:
             response_hours.append((responded - created).total_seconds() / 3600)
-        elif cutoff - created > WAIT:
+        if cutoff - created > WAIT and (
+            responded is None or responded - created > WAIT
+        ):
             waiting += 1
 
     merged = [p for p in pulls if p.get("merged_at")]

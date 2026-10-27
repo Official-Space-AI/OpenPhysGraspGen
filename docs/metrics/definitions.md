@@ -29,7 +29,7 @@ an author who is not an owner, member or collaborator of the repository.
 | `prs_opened`, `prs_merged` | Pull requests created or merged in the month | Contribution flow |
 | `outside_items_opened` | Issues and pull requests created in the month by outside authors | How much reaches us from outside |
 | `median_first_response_hours` | For those outside items: the median time from creation to the first comment or review by someone other than the author. Empty when there were none | Responsiveness; [COMMUNITY.md](../../COMMUNITY.md) promises first triage within 48 hours |
-| `items_without_response_7d` | Outside items created in the month that had no response from someone other than the author more than 7 days after creation | People left waiting; target 0 |
+| `items_without_response_7d` | Outside items created in the month that waited more than 7 days for a first response from someone other than the author, whether one came later or not | People left waiting; target 0 |
 | `outside_pr_authors` | Distinct outside authors who opened a pull request in the month, merged or not | New contributors trying |
 | `first_time_contributors` | Authors whose first merged pull request is in the month | Contributions that land |
 | `repeat_contributors` | Authors with a merged pull request in the month who also had one before | Contributors who come back |
