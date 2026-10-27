@@ -11,7 +11,7 @@ this scope.
 | Part | Contents | License |
 |---|---|---|
 | The `openphysgraspgen` package (this repository) | Constitutive laws, contact sensors, the grasp data recorder and reader, the dataset check and the PG-T1 scorer (with `1.0.0rc1`), examples and documentation | Apache-2.0 |
-| The grasp dataset (Hugging Face Hub, with `1.0.0rc1`) | One million frames of deformable-object grasps with physical ground truth, described in its dataset card | CC-BY-4.0 |
+| The grasp dataset (Hugging Face Hub, with `1.0.0rc1`) | One million frames of deformable-object grasps with physical ground truth, described in its dataset card | CC-BY-NC-4.0 |
 | Benchmarks | PG-T1 with `1.0.0rc1`, PG-T2 and PG-T3 later | Apache-2.0 |
 | The container image (with each release) | The package on the official Python image | Apache-2.0. The base image's packages keep their own licenses |
 
@@ -46,7 +46,7 @@ parts is described in [COMMUNITY.md](../../COMMUNITY.md).
 
 1. What is needed to write, read and check the public dataset and to reproduce the
    public benchmarks stays open source, with no limits on use, time or scale.
-2. Released versions keep their licenses: Apache-2.0 for the code and CC-BY-4.0 for
+2. Released versions keep their licenses: Apache-2.0 for the code and CC-BY-NC-4.0 for
    the dataset.
 3. This page lists the commercial offerings, and the release notes announce any
    change to the line between open and commercial.
