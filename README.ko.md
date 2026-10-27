@@ -80,7 +80,7 @@ openphysgraspgen benchmark pg-t1 path/to/dataset --json pg-t1.json
 | 구분 | 위치 | 라이선스 |
 |---|---|---|
 | 라이브러리 (이 저장소) | GitHub | Apache-2.0 |
-| 파지 데이터셋 | Hugging Face Hub (`1.0.0rc1`부터) | CC-BY-4.0 |
+| 파지 데이터셋 | Hugging Face Hub (`1.0.0rc1`부터) | CC-BY-NC-4.0 |
 | 벤치마크와 재현 스크립트 | 이 저장소 (PG-T1은 `1.0.0rc1`, 나머지는 `1.0.0`) | Apache-2.0 |
 | 고정밀 솔버 코어 | 비공개 | 상용 |
 
@@ -105,4 +105,4 @@ request로 들어오고, 릴리스는 릴리스 노트와 SBOM을 붙여 배포�
 
 ## 라이선스
 
-코드는 [Apache License 2.0](LICENSE), 데이터셋은 CC-BY-4.0으로 공개합니다.
+코드는 [Apache License 2.0](LICENSE), 데이터셋은 [CC-BY-NC-4.0](https://creativecommons.org/licenses/by-nc/4.0/deed.ko)으로 비상업적 이용에 한해 공개합니다.
