@@ -50,11 +50,29 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    env:
+      # The 3.12 job runs the tests that encode and decode AV1 with a real ffmpeg, and
+      # fails them rather than skip them when it cannot.
+      REQUIRE_AV1: ${{ matrix.python-version == '3.12' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install ffmpeg
+        if: env.REQUIRE_AV1 == '1'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Check that ffmpeg has the SVT-AV1 encoder and the dav1d decoder
+        if: env.REQUIRE_AV1 == '1'
+        run: |
+          ffmpeg -version
+          dpkg-query -W 'libsvtav1enc*' 'libdav1d*'
+          # The writer encodes with libsvtav1, and read_video decodes with ffmpeg's
+          # default AV1 decoder, libdav1d.
+          ffmpeg -hide_banner -encoders | grep -w libsvtav1
+          ffmpeg -hide_banner -decoders | grep -w libdav1d
       - run: pip install -e ".[dev,dataset]"
       - run: pytest --cov=openphysgraspgen --cov-report=term-missing
       - name: CLI smoke test

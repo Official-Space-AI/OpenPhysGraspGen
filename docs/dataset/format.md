@@ -151,9 +151,10 @@ deformation gradient (N, T, 3, 3).
 - `robot.phase` is a nonempty string, here and in the trajectory.
 - A mask value is the index of a segmentation class, 0 to 5. Depth and `stress.volume_ratio` have
   no rule beyond their type.
-- A frame's `robot` and `object` columns, and its two force magnitudes, hold the trajectory's
-  values at the frame's step, NaN where the trajectory's is NaN. A frame therefore lies on a step
-  whose object state is finite.
+- A frame's `robot` and `object` columns that the trajectory also has (all but
+  `object.n_soft_contacts` and `object.n_rigid_contacts`), and its two force magnitudes, hold the
+  trajectory's values at the frame's step, NaN where the trajectory's is NaN. A frame therefore lies
+  on a step whose object state is finite.
 
 ## Trajectory file
 
@@ -280,6 +281,8 @@ video's index. Then it hashes each file. It refuses the dataset when:
 
 - the root holds no episode, or a file the layout does not define (an interrupted episode leaves
   `.part` files), or `tools/` holds a file other than the two tool files;
+- a file or folder under the root is a symbolic link: an upload publishes a link as the link or as
+  what it names, which may lie outside the root, so finalize follows none;
 - a file breaks a rule of the check: an episode's metadata (its keys, their values, the identity
   of its path), a file's columns (names, order, types, nullability, field metadata), a value of a
   frame or of a trajectory step, a video's index or its sha256, a file of an episode that is
@@ -303,9 +306,10 @@ stores them.
 With `check_seed=`, finalize then runs the `tools/check_dataset.py` it wrote on the dataset, with
 the running interpreter and that seed, and the metadata it returns holds `check`: the check's exit
 status and its `RESULT` payload. A failed check is returned as such, and the check fails until
-`doi` and `download_url` are given; a check that could not run raises `DatasetError`. That the
-script needs nothing but NumPy, PyArrow and PyYAML is shown by the tests, which run it with
-nothing else importable.
+`doi` and `download_url` are given. A check that could not run raises `DatasetError` although the
+dataset was not refused: the tool files, `.gitattributes`, `metadata.yaml` and `SHA256SUMS` are
+written by then, and finalizing again replaces them. That the script needs nothing but NumPy,
+PyArrow and PyYAML is shown by the tests, which run it with nothing else importable.
 
 ## Conventions
 
@@ -476,12 +480,13 @@ which may be given but must equal the frame's `sim_step`); `source_frame_index` 
 an episode's `source_n_frames`, which is None only when the generator's frame count is unknown. RGB
 is given as `rgb.<camera>.image`, (H, W, 3) uint8, the contacts as `force.contact_force`,
 `force.contact_point_world`, `force.contact_particle`, `force.contact_is_ground` and
-`force.contact_is_robot`, one row per contact, and the camera matrices as 3 x 3 and 4 x 4 arrays. A
-step gives every column of the trajectory file except `episode_uid` and `sim_time_s`. In the `robot`
-and `object` columns, a value that may be NaN may also be given as None. The writer copies what it
-keeps, so a caller may refill one set of arrays for every frame and step. A frame or a step that
-does not follow the format, its value rules included, is refused before anything of it is written;
-so is a float64 value too large for a float32 column.
+`force.contact_is_robot`, one row per contact (without contacts, any array without rows, such as
+`np.array([])`), and the camera matrices as 3 x 3 and 4 x 4 arrays. A step gives every column of the
+trajectory file except `episode_uid` and `sim_time_s`. In the `robot` and `object` columns, a value
+that may be NaN may also be given as None. The writer copies what it keeps, so a caller may refill
+one set of arrays for every frame and step. A frame or a step that does not follow the format, its
+value rules included, is refused before anything of it is written; so is a float64 value too large
+for a float32 column.
 
 An episode is written to `.part` files that are renamed only when every file of the episode is
 complete, the frames file last. The writer claims the episode by creating its frames `.part` file,

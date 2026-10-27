@@ -130,9 +130,25 @@ def _tools(criteria: str | Path | None) -> tuple[dict[str, bytes], dict[str, Any
     return dict(zip(fmt.TOOL_FILES, (script, data))), values
 
 
+def _links(root: Path) -> list[str]:
+    """Every symbolic link under root, whether it names a file, a folder or nothing,
+    outside the folders finalize skips. os.walk lists a linked folder but does not
+    enter it."""
+    links = []
+    for directory, subdirs, names in os.walk(root):
+        here = Path(directory)
+        if here == root:
+            subdirs[:] = [d for d in subdirs if d not in SKIPPED_DIRS]
+        for name in (*subdirs, *names):
+            if (here / name).is_symlink():
+                links.append((here / name).relative_to(root).as_posix())
+    return sorted(links)
+
+
 def _published_check(root: Path, seed: int, workers: int) -> dict[str, Any]:
     """Run the dataset's own tools/check_dataset.py on it with this interpreter, and
-    return its exit status and RESULT payload; a check that could not run is refused."""
+    return its exit status and RESULT payload. A check that could not run raises
+    DatasetError, though the dataset's files are written."""
     root = root.resolve()
     done = subprocess.run(
         [
@@ -179,7 +195,8 @@ def finalize_dataset(
 
     Every Parquet file is read in full, every page checksum verified and every value
     rule applied, and every video's index read, in `workers` threads; then each file is
-    hashed. tools/check_dataset.py is the package's check_dataset.py byte for byte, and
+    hashed. A symbolic link under root, to a file or a folder, is refused, not followed.
+    tools/check_dataset.py is the package's check_dataset.py byte for byte, and
     tools/check_criteria.yaml the packaged acceptance values, or the file criteria names.
     doi is a bare DOI (10.<registrant>/<suffix>, a registrant code of 4 to 9 digits)
     and download_url an https URL. Nothing is written when the dataset is refused.
@@ -187,8 +204,10 @@ def finalize_dataset(
     With check_seed, the tools/check_dataset.py written then checks the dataset with
     that seed, run by this interpreter, and the metadata returned holds `check`: its
     exit status and RESULT payload. A failed check is returned as such, and the check
-    fails until doi and download_url are given; one that could not run raises
-    DatasetError.
+    fails until doi and download_url are given. One that could not run raises
+    DatasetError although the dataset was not refused: tools/, .gitattributes,
+    metadata.yaml and SHA256SUMS are written by then, and finalizing again replaces
+    them.
     """
     root = Path(root)
     errors: list[str] = []
@@ -208,6 +227,11 @@ def finalize_dataset(
     ):
         errors.append(f"check_seed must be an integer: {check_seed!r}")
     tools, values = _tools(criteria)
+    # An upload publishes a link as the link or as what it names, as the tool decides,
+    # and what it names may lie outside the root: finalize follows none.
+    links = _links(root)
+    if links:
+        _refuse(errors + [f"{rel} is a symbolic link" for rel in links])
     rels, others = fmt.find_data_files(root)
     errors += [f"{rel} is not part of the format" for rel in others]
     data_dirs = (fmt.DATA_DIR, fmt.TRAJECTORY_DIR, fmt.VIDEO_DIR)

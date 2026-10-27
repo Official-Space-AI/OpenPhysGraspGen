@@ -249,6 +249,7 @@ def read_video(
     command = [
         find_ffmpeg(ffmpeg, reading=True),
         "-hide_banner",
+        "-nostdin",
         "-loglevel",
         "error",
         "-xerror",
@@ -261,8 +262,14 @@ def read_video(
         "pipe:1",
     ]
     with tempfile.TemporaryFile() as stderr:
+        # ffmpeg reads keys from its standard input: from the caller's, it would take
+        # a pipeline's input, or stop in a background job when it touches the terminal.
         process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=stderr, bufsize=0
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            bufsize=0,
         )
         stdout = process.stdout
         assert stdout is not None

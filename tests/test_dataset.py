@@ -74,6 +74,22 @@ from openphysgraspgen.dataset import writer as writer_module
 # --- writing and reading -----------------------------------------------------------
 
 
+def null_counts(table):
+    """Each column's nulls, those of its lists' values and its structs' fields too."""
+    counts = {}
+    for name in table.column_names:
+        arrays, counts[name] = [table.column(name).combine_chunks()], 0
+        while arrays:
+            array = arrays.pop()
+            counts[name] += array.null_count
+            kind = array.type
+            if pa.types.is_struct(kind):
+                arrays += array.flatten()
+            elif pa.types.is_list(kind) or pa.types.is_fixed_size_list(kind):
+                arrays.append(array.flatten())
+    return counts
+
+
 def test_an_episode_reads_back_as_written(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     frames = write_episode(recorder, source_n_frames=10)
@@ -145,6 +161,11 @@ def test_an_episode_reads_back_as_written(tmp_path):
         for name in ("robot.arm_q", "robot.grip_contact_width_m", "object.bbox_max"):
             if step != 3 or name not in fmt.NOT_FINITE_COLUMNS:
                 np.testing.assert_array_equal(trajectory[name][i], row[name], name)
+    # The reader returns a float null as NaN, so the NaNs above could be nulls: no
+    # column, list or struct field of either file holds one.
+    for path in (files.frames, files.trajectory):
+        table = pq.read_table(path)
+        assert null_counts(table) == dict.fromkeys(table.column_names, 0), path
 
     meta = episode_metadata(files.frames)
     assert set(meta) == set(fmt.EPISODE_KEYS)
@@ -274,6 +295,29 @@ def test_the_writer_keeps_copies_of_what_it_is_given(tmp_path):
         trajectory = read_trajectory(files.trajectory)
         assert trajectory["object.centroid"][:, 2].tolist() == pytest.approx(
             [0.01 * s for s in range(1, 9)]
+        )
+
+
+def test_a_frame_without_contacts_may_give_arrays_without_rows(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    # np.array([c.force for c in contacts]) of no contacts is (0,) float64, whatever
+    # the field; an empty list, or no rows of another shape or type, is none either.
+    empties = [np.array([]), [], np.zeros((0, 2), dtype=np.int64)]
+    with open_episode(recorder) as episode:
+        for i, empty in enumerate(empties):
+            frame = make_frame(2 * (i + 1), recorder.spec, n_contacts=0)
+            frame.update(dict.fromkeys(writer_module.CONTACT_INPUTS, empty))
+            episode.add_frame(frame)
+        pressed = make_frame(8, recorder.spec)
+        episode.add_frame(pressed)
+        for step in range(1, 9):
+            episode.add_step(make_step(step))
+    data = read_frames(recorder.files("apple", "ep-0").frames)
+    assert data["force.n_contacts"].tolist() == [0, 0, 0, 2]
+    assert data["force.contact_offset"].tolist() == [0, 0, 0, 0, 2]
+    for key in writer_module.CONTACT_INPUTS:
+        np.testing.assert_array_equal(
+            data[key], np.asarray(pressed[key], dtype=data[key].dtype), key
         )
 
 
@@ -1516,6 +1560,70 @@ def test_finalize_refuses_what_the_format_does_not_describe(tmp_path, damage, me
     assert not (tmp_path / "SHA256SUMS").exists()
 
 
+def _link_elsewhere(root, rel):
+    """Move rel out of the root, and leave a symbolic link to it in its place."""
+    moved = root.parent / "elsewhere" / rel
+    moved.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(root / rel, moved)
+    (root / rel).symlink_to(moved, target_is_directory=moved.is_dir())
+
+
+def _link_folder(root, rel):
+    """A symbolic link at rel to a folder outside the root that holds a file."""
+    folder = root.parent / "linked"
+    folder.mkdir()
+    (folder / "notes.txt").write_text("")
+    (root / rel).symlink_to(folder, target_is_directory=True)
+
+
+@POSIX
+@pytest.mark.parametrize(
+    ("link", "rel"),
+    [
+        # A type's folder on another disk, as an export might put it.
+        (lambda root: _link_elsewhere(root, "data/banana"), "data/banana"),
+        (lambda root: _link_elsewhere(root, "trajectories"), "trajectories"),
+        (
+            lambda root: _link_elsewhere(root, "data/apple/ep-0.parquet"),
+            "data/apple/ep-0.parquet",
+        ),
+        (
+            lambda root: (root / "data/apple/ep-9.parquet").symlink_to(root / "none"),
+            "data/apple/ep-9.parquet",
+        ),
+        # A folder that os.walk does not enter, and one that finalize writes into.
+        (lambda root: _link_folder(root, "notes"), "notes"),
+        (lambda root: _link_folder(root, "tools"), "tools"),
+        (lambda root: _link_elsewhere(root, "README.md"), "README.md"),
+    ],
+)
+def test_finalize_refuses_a_symbolic_link_under_the_root(tmp_path, link, rel):
+    root = tmp_path / "root"
+    recorder = GraspDataRecorder(root, make_spec())
+    write_episode(recorder, uid="ep-0", object_type="apple")
+    write_episode(recorder, uid="ep-1", object_type="banana", n_frames=3)
+    (root / "README.md").write_text(card_front_matter() + "\n# unit-test\n")
+    link(root)
+    with pytest.raises(
+        DatasetError,
+        match=f"^cannot finalize the dataset:\n  {re.escape(rel)} is a symbolic link$",
+    ):
+        recorder.finalize()
+    # Nothing is written, through a link either.
+    for name in (*finalize_module.WRITTEN, *fmt.TOOL_FILES):
+        assert not (root / name).exists(), name
+
+
+@POSIX
+def test_finalize_follows_no_link_in_the_folders_it_skips(tmp_path):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    write_episode(recorder)
+    for name in finalize_module.SKIPPED_DIRS:
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "link").symlink_to(tmp_path / "none")
+    assert recorder.finalize()["counts"]["n_files"] == 2
+
+
 def test_finalize_replaces_the_part_files_of_a_finalize_that_was_stopped(tmp_path):
     recorder = GraspDataRecorder(tmp_path, make_spec())
     write_episode(recorder)
@@ -1538,6 +1646,32 @@ def test_finalize_replaces_the_part_files_of_a_finalize_that_was_stopped(tmp_pat
         "tools/check_dataset.py",
         "trajectories/apple/ep-0.parquet",
     ]
+
+
+def test_finalize_writes_the_dataset_before_a_check_that_could_not_run(
+    tmp_path, monkeypatch
+):
+    recorder = GraspDataRecorder(tmp_path, make_spec())
+    write_episode(recorder)
+
+    def refused(args, **kwargs):
+        stdout = 'RESULT {"pass": false, "reason": "no NumPy"}\n'
+        return subprocess.CompletedProcess(args, 2, stdout=stdout)
+
+    monkeypatch.setattr(finalize_module.subprocess, "run", refused)
+    with pytest.raises(DatasetError, match="the dataset check could not run"):
+        recorder.finalize(check_seed=7)
+    # The dataset was not refused: its files are written, as without check_seed.
+    assert files_under(tmp_path) == [
+        ".gitattributes",
+        "SHA256SUMS",
+        "data/apple/ep-0.parquet",
+        "metadata.yaml",
+        "tools/check_criteria.yaml",
+        "tools/check_dataset.py",
+        "trajectories/apple/ep-0.parquet",
+    ]
+    assert read_metadata(tmp_path)["counts"]["n_files"] == 2
 
 
 def test_finalize_refuses_object_types_that_differ_in_case(tmp_path):
@@ -1786,6 +1920,36 @@ def test_read_video_checks_the_size_and_count_and_names_the_decoder(tmp_path):
         RuntimeError, match="reading RGB needs an ffmpeg .* AV1 decoder"
     ):
         read_video(path, ffmpeg=str(tmp_path / "no-ffmpeg"))
+
+
+@POSIX
+def test_read_video_leaves_the_callers_input_alone(tmp_path):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(minimal_mp4(4))
+    # An ffmpeg that keeps its arguments and all it reads, then decodes black frames.
+    ffmpeg = _fake_ffmpeg(
+        tmp_path,
+        f'echo "$@" > "$0.args"; cat > "$0.input"; head -c {4 * H * W * 3} /dev/zero',
+    )
+    # The caller's standard input: a pipe that holds a line.
+    read, write = os.pipe()
+    os.write(write, b"the caller's input\n")
+    os.close(write)
+    saved = os.dup(0)
+    os.dup2(read, 0)
+    try:
+        frames = read_video(path, (H, W), ffmpeg)
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+    try:
+        left = os.read(read, 100)
+    finally:
+        os.close(read)
+    assert frames.shape == (4, H, W, 3) and not frames.any()
+    assert left == b"the caller's input\n"
+    assert (tmp_path / "ffmpeg.input").read_bytes() == b""
+    assert "-nostdin" in (tmp_path / "ffmpeg.args").read_text().split()
 
 
 @POSIX
