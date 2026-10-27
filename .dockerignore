@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
+# SPDX-License-Identifier: Apache-2.0
+*
+!dist/*.whl
+!docker/requirements.txt
+!LICENSE
+!NOTICE
