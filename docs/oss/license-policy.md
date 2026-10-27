@@ -4,7 +4,9 @@ This policy sorts licenses into the classes that decide what this repository may
 depend on: runtime dependencies, build, test and CI tools, GitHub Actions, external
 programs, data and models. The dependency review check enforces its allowed class on
 every pull request ([`.github/dependency-review-config.yml`](../../.github/dependency-review-config.yml)),
-and each [OSS evaluation](evaluation.md) applies the rest.
+and each [OSS evaluation](evaluation.md) applies the rest. The classes are about what
+we take in. The licenses of what we publish ourselves are under
+[What we publish](#what-we-publish).
 
 The policy takes effect when it is merged. It changes only through a pull request
 that the project lead approves, so the history of this file is the history of the
@@ -42,7 +44,8 @@ steps are in [evaluation.md](evaluation.md).
 ## What we publish
 
 Our code is under Apache-2.0, and every file carries SPDX license information that
-`reuse lint` checks in CI. Each dataset release states its license in its dataset
-card. Before code, data or a model is published, a maintainer fills in the **OSS
+`reuse lint` checks in CI. The grasp dataset is under CC BY-NC 4.0
+([#79](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/79)), which each
+release also states in its dataset card. Before code, data or a model is published, a maintainer fills in the **OSS
 evaluation** form with the gate *Publish our OSS*, as [GOVERNANCE.md](../../GOVERNANCE.md)
 describes.
