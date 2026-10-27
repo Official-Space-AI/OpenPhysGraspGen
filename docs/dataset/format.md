@@ -208,9 +208,9 @@ the metadata's own object the first. It holds exactly these keys:
 | `video` | the encoder settings (see Videos), or null without RGB |
 | `ffmpeg_version` | the first line of `ffmpeg -version` of the build that encoded the videos, or null without RGB |
 | `video_sha256` | per camera of `cameras`, the sha256 of its video in lower-case hex, or null without RGB. It ties each video to its episode by content |
-| `facts` | per-episode values the diversity tables read, nested by kind. `material`, `placement`, `lighting` and `camera` are each a mapping holding at least one value that is not null; other kinds may be added |
+| `facts` | per-episode values the diversity tables read, nested by kind. `material`, `placement`, `lighting` and `camera` are each a mapping holding at least one value that is not null; other kinds may be added. `material` holds category labels, such as the material class, and no material parameters |
 | `task` | what benchmark scoring reads besides the trajectory, a mapping or null. For PG-T1 it is the [task block](../benchmark/pg-t1.md#the-task-block); the writer does not check its keys, and the PG-T1 scorer refuses an episode whose block is null or does not follow that page |
-| `header`, `generation_provenance`, `export_provenance` | the generator's episode header and the records of the code and data that generated and exported it, each a mapping or null |
+| `header`, `generation_provenance`, `export_provenance` | the generator's episode header and the records of the code and data that generated and exported it, each a mapping or null. They hold what identifies how the episode was made, such as code commits, package versions and seeds, and no fitted or measured material parameters, solver settings or the distributions that values are drawn from |
 | `source_n_frames`, `source_cut_at_row` | the generator's frame count, at least `n_steps`, which `n_steps` equals when the trajectory holds every step the generator recorded, or null when it is unknown; and the row the export stopped at because a frame missed a layer (-1 when it did not stop early) |
 
 Every episode of a dataset must state the same `format`, `format_version`, `dataset_name`,
