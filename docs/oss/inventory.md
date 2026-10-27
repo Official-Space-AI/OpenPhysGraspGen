@@ -16,7 +16,7 @@ Installed with the package. The `dataset` extra is optional
 | Component | Accepted | Resolves to | License | Used for | Evaluation | Status |
 |---|---|---|---|---|---|---|
 | NumPy | `>=1.24`; `>=1.26` with the `dataset` extra | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Array math throughout the package | [#52][52] (re-evaluation) | Approved 2026-10-27 |
-| PyArrow | `>=17` (`dataset` extra) | 26.0.0 | Apache-2.0 | Reading and writing the dataset's Parquet files | [#45][45] | Decided: raise the floor to `>=23.0.1` ([PR #75](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/75)), see the [vulnerability log](vulnerability-log.md) |
+| PyArrow | `>=23.0.1` (`dataset` extra) | 26.0.0 | Apache-2.0 | Reading and writing the dataset's Parquet files | [#45][45] | Decided 2026-10-27: the floor was raised past CVE-2026-25087 ([PR #75](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/75)), see the [vulnerability log](vulnerability-log.md) |
 | PyYAML | `>=6` (`dataset` extra) | 6.0.3 | MIT | `metadata.yaml` and the check criteria, loaded with `SafeLoader` only | [#46][46] | Approved 2026-10-27 |
 
 ## External programs
