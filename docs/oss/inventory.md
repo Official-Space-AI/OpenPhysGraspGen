@@ -15,9 +15,9 @@ Installed with the package. The `dataset` extra is optional
 
 | Component | Accepted | Resolves to | License | Used for | Evaluation | Status |
 |---|---|---|---|---|---|---|
-| NumPy | `>=1.24`; `>=1.26` with the `dataset` extra | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Array math throughout the package | [#52][52] (re-evaluation) | Approval pending |
+| NumPy | `>=1.24`; `>=1.26` with the `dataset` extra | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Array math throughout the package | [#52][52] (re-evaluation) | Approved 2026-10-27 |
 | PyArrow | `>=17` (`dataset` extra) | 26.0.0 | Apache-2.0 | Reading and writing the dataset's Parquet files | [#45][45] | Decided: raise the floor to `>=23.0.1` ([PR #75](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/75)), see the [vulnerability log](vulnerability-log.md) |
-| PyYAML | `>=6` (`dataset` extra) | 6.0.3 | MIT | `metadata.yaml` and the check criteria, loaded with `SafeLoader` only | [#46][46] | Approval pending |
+| PyYAML | `>=6` (`dataset` extra) | 6.0.3 | MIT | `metadata.yaml` and the check criteria, loaded with `SafeLoader` only | [#46][46] | Approved 2026-10-27 |
 
 ## External programs
 
@@ -33,18 +33,31 @@ Not installed with the package and not distributed.
 
 | Component | Accepted | Resolves to | License | Used for | Evaluation | Status |
 |---|---|---|---|---|---|---|
-| setuptools | `>=77` (`[build-system]`) | 84.2.1 | MIT | Build backend | [#66][66] | Approval pending; condition on the floor |
-| build | `==1.6.1` | 1.6.1 | MIT | Building the sdist and wheel in CI and releases | [#66][66] | Approval pending |
-| twine | `==7.0.0` | 7.0.0 | Apache-2.0 | `twine check --strict` before the PyPI upload | [#66][66] | Approval pending |
-| pytest | `>=9.0.3` (`dev` extra) | 9.1.1 | MIT | Tests | [#50][50] | Approval pending; the floor condition is met ([PR #54](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/54)) |
-| pytest-cov, coverage | `>=5` (`dev` extra) | 7.1.0, 7.17.0 | MIT, Apache-2.0 | Test coverage | [#50][50] | Approval pending |
-| Ruff | `==0.17.1` (`dev` extra) | 0.17.1 | MIT | Lint and format | [#49][49] | Approval pending |
+| setuptools | `>=77` (`[build-system]`) | 84.2.1 | MIT | Build backend | [#66][66] | Approved 2026-10-27, on condition that the floor is raised to `>=84.1.0` before 1.0.0rc1 |
+| build | `==1.6.1` | 1.6.1 | MIT | Building the sdist and wheel in CI and releases | [#66][66] | Approved 2026-10-27 |
+| twine | `==7.0.0` | 7.0.0 | Apache-2.0 | `twine check --strict` before the PyPI upload | [#66][66] | Approved 2026-10-27 |
+| pytest | `>=9.0.3` (`dev` extra) | 9.1.1 | MIT | Tests | [#50][50] | Approved 2026-10-27; the floor condition is met ([PR #54](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/54)) |
+| pytest-cov, coverage | `>=5` (`dev` extra) | 7.1.0, 7.17.0 | MIT, Apache-2.0 | Test coverage | [#50][50] | Approved 2026-10-27 |
+| Ruff | `==0.17.1` (`dev` extra) | 0.17.1 | MIT | Lint and format | [#49][49] | Approved 2026-10-27 |
 | REUSE | `==6.2.0` (CI only) | 6.2.0 | GPL-3.0-or-later (review required) | `reuse lint` | [#48][48] | Approved 2026-10-27, CI only |
+
+## Container image
+
+The image published with each release ([`Dockerfile`](../../Dockerfile)) holds the
+wheel with its `dataset` extra, NumPy, PyArrow and PyYAML at the exact versions in
+[`docker/requirements.txt`](../../docker/requirements.txt), and nothing else of ours.
+It does not include FFmpeg. Each release attaches the image SBOM, which lists every
+package in it.
+
+| Component | Accepted | License | Used for | Evaluation | Status |
+|---|---|---|---|---|---|
+| Docker official image `python:3.12-slim-trixie` | pinned by digest in the `Dockerfile` | Python-2.0.1 (CPython); its Debian packages keep their own licenses, many GPL or LGPL (review required) | Base image, used unmodified | [#72][72] | Approved 2026-10-25, with conditions; re-checked on every digest change |
+| NumPy, PyArrow, PyYAML | `numpy==2.5.4`, `pyarrow==26.0.0`, `pyyaml==6.0.3` | as above; the NumPy wheel bundles libgfortran and libquadmath (review required) | As in the package | [#52][52], [#45][45], [#46][46] | As above |
 
 ## GitHub Actions
 
 Workflows in `.github/workflows/`; the release and dependency review workflows pin
-each action to a commit SHA. All are covered by [#51][51] (approval pending).
+each action to a commit SHA. All are covered by [#51][51] (approved 2026-10-27).
 
 | Action | Version on `main` | License | Used for |
 |---|---|---|---|
@@ -56,7 +69,7 @@ each action to a commit SHA. All are covered by [#51][51] (approval pending).
 | anchore/scan-action (Grype) | v7.4.2 (Grype v0.118.0) | MIT | Vulnerability scan of the release SBOM |
 | actions/attest | v4.2.2 | MIT | Build provenance attestations |
 | pypa/gh-action-pypi-publish | v1.14.3 | BSD-3-Clause | Trusted publishing to PyPI |
-| CodeQL (default setup) | managed by GitHub | MIT (action), GitHub CodeQL terms (CLI) | Code scanning |
+| CodeQL (default setup) | managed by GitHub | MIT (action), GitHub CodeQL terms (CLI) | Code scanning, on this public repository only |
 
 [45]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/45
 [46]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/46
@@ -67,3 +80,4 @@ each action to a commit SHA. All are covered by [#51][51] (approval pending).
 [51]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/51
 [52]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/52
 [66]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/66
+[72]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/72
