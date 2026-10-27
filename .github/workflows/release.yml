@@ -1,8 +1,10 @@
 name: Release
 
 # Pushing a version tag (v1.0.0rc1, v1.0.0, ...) builds the sdist and wheel, describes
-# them in SPDX and CycloneDX SBOMs, publishes them to PyPI and attaches everything to a
-# GitHub release. Steps for maintainers are in RELEASING.md.
+# them in SPDX and CycloneDX SBOMs, and builds, checks and scans the container image from
+# the same wheel. Only when all of that has passed does it publish the sdist and wheel to
+# PyPI; it then attaches everything to a GitHub release and pushes the image it already
+# built to the GitHub Container Registry. Steps for maintainers are in RELEASING.md.
 #
 # Third-party actions are pinned to full commit SHAs, with the release tag in a comment;
 # Dependabot (.github/dependabot.yml) proposes updates.
@@ -74,8 +76,16 @@ jobs:
             dist/
             sbom/
 
-  pypi:
+  # Everything about the image that can fail runs before PyPI: building it from the
+  # released wheel, the image checks, the SBOM completion and the vulnerability gate.
+  image:
     needs: build
+    uses: ./.github/workflows/image.yml
+    with:
+      release: true
+
+  pypi:
+    needs: [build, image]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -91,7 +101,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   github-release:
-    needs: pypi
+    needs: [image, pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -101,6 +111,13 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-sbom
+          path: sbom/
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-scan
       # Bare file names, so `sha256sum -c` works on the assets as downloaded from the release.
       - run: cd dist && sha256sum -- * > ../SHA256SUMS
       - name: Attest build provenance
@@ -120,4 +137,48 @@ jobs:
           if [[ "$GITHUB_REF_NAME" =~ (a|b|rc)[0-9]+$ ]]; then prerelease=--prerelease; fi
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "$GITHUB_REF_NAME" --generate-notes $prerelease \
-            dist/* sbom/* SHA256SUMS
+            dist/* sbom/* SHA256SUMS "openphysgraspgen-image-$GITHUB_REF_NAME.grype.json"
+
+  # Pushes the image that the image job built and checked; nothing is rebuilt here, so
+  # re-running this job after a failed push pushes the same image (RELEASING.md).
+  docker:
+    needs: [image, pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image
+          path: ${{ runner.temp }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-sbom
+          path: sbom/
+      - name: Push the image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/openphysgraspgen"
+          docker load --input "$RUNNER_TEMP/image.tar"
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$image:${GITHUB_REF_NAME#v}"
+          digest=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image:${GITHUB_REF_NAME#v}" | grep -F "$image@")
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "DIGEST=${digest#*@}" >> "$GITHUB_ENV"
+      - name: Attest the image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          push-to-registry: true
+      - name: Attest the image SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          sbom-path: sbom/openphysgraspgen-image-${{ github.ref_name }}.spdx.json
+          push-to-registry: true

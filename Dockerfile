@@ -1,0 +1,76 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The release image: the published wheel, with its dataset extra, on the official Python
+# image. The base image is used unmodified and pinned by digest; its Debian packages keep
+# their own licenses. The image SBOM attached to each GitHub release lists every package.
+# Build it from a built wheel: python -m build --wheel, then
+# docker build --platform linux/amd64 .
+#
+# The base image is written out in FROM so that Dependabot can propose a new digest.
+# BASE_IMAGE repeats it for the label and NOTICE.container, and
+# .github/scripts/check_image.sh fails when the two differ.
+FROM docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
+ARG BASE_IMAGE=docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
+# The docker-library/python Dockerfile that built the base image, at the commit that the
+# org.opencontainers.image.source annotation of its linux/amd64 manifest names, for
+# NOTICE.container. check_image.sh fails when it does not match that annotation.
+ARG BASE_DOCKERFILE=https://github.com/docker-library/python/blob/2a3b794c223ab067d122719541cdd54a068732a5/3.12/slim-trixie/Dockerfile
+
+# NumPy, PyArrow and PyYAML come at the exact versions in docker/requirements.txt, as
+# wheels, so the image holds what was reviewed and a rebuild of a tag holds the same.
+COPY dist/*.whl docker/requirements.txt /tmp/dist/
+RUN wheel="$(ls /tmp/dist/*.whl)" \
+    && python -m pip install --no-cache-dir --root-user-action=ignore --only-binary=:all: \
+        --constraint /tmp/dist/requirements.txt "${wheel}[dataset]" \
+    && rm -rf /tmp/dist \
+    && groupadd --gid 1000 openpgg \
+    && useradd --create-home --uid 1000 --gid 1000 openpgg
+
+COPY LICENSE NOTICE /usr/share/doc/openphysgraspgen/
+RUN printf '%s\n' \
+    "OpenPhysGraspGen container image" \
+    "" \
+    "This image holds OpenPhysGraspGen (Apache-2.0, see LICENSE and NOTICE in this folder)" \
+    "and its Python dependencies from PyPI, on top of this official Docker image, used" \
+    "unmodified:" \
+    "" \
+    "  ${BASE_IMAGE}" \
+    "" \
+    "The SBOM attached to each GitHub release lists every package in the image with its" \
+    "version and license. Its components under the GPL, the LGPL, the MPL-2.0 or another" \
+    "license that requires their source to be available are:" \
+    "" \
+    "- The Debian packages of the base image, many of them GPL or LGPL. ca-certificates" \
+    "  holds the Mozilla CA list under the MPL-2.0, and libdb5.3t64 is Berkeley DB under" \
+    "  the Sleepycat license. Their source is available from Debian at those versions" \
+    "  (https://snapshot.debian.org, https://sources.debian.org)." \
+    "- certifi, which pip vendors: the same Mozilla CA list under the MPL-2.0, in source" \
+    "  form in the image." \
+    "- Python ${PYTHON_VERSION} (CPython), whose modules link Berkeley DB, GNU dbm and GNU" \
+    "  Readline. The official image compiles it, without changes, from the source release" \
+    "  https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" \
+    "  with the Dockerfile at" \
+    "  ${BASE_DOCKERFILE}" \
+    "- The GCC runtime libraries that the NumPy wheel bundles in numpy.libs: libgfortran," \
+    "  GPL-3.0-or-later with the GCC Runtime Library Exception 3.1, and libquadmath," \
+    "  LGPL-2.1-or-later. Their source is part of GCC (https://gcc.gnu.org)." \
+    "" \
+    "Written offer: for at least three years after we last distribute this image, SpaceAI" \
+    "(주식회사 스페이스에이아이) will give anyone who asks a complete machine-readable copy" \
+    "of the corresponding source of any component of this image under the GPL, the LGPL," \
+    "the MPL-2.0 or another license that requires source availability, the CPython build" \
+    "and the GCC runtime libraries above included, for no more than the cost of physically" \
+    "performing the distribution. Write to oss.spaceai@gmail.com with the image tag or" \
+    "digest and the components you need." \
+    > /usr/share/doc/openphysgraspgen/NOTICE.container
+
+LABEL org.opencontainers.image.title="OpenPhysGraspGen" \
+      org.opencontainers.image.source="https://github.com/Official-Space-AI/OpenPhysGraspGen" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.name="${BASE_IMAGE}"
+
+# A numeric user, so that Kubernetes runAsNonRoot can tell it is not root.
+USER 1000:1000
+WORKDIR /home/openpgg
+ENTRYPOINT ["openphysgraspgen"]
