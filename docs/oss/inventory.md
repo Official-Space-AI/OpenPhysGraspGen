@@ -16,7 +16,7 @@ Installed with the package. The `dataset` extra is optional
 | Component | Accepted | Resolves to | License | Used for | Evaluation | Status |
 |---|---|---|---|---|---|---|
 | NumPy | `>=1.24`; `>=1.26` with the `dataset` extra | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Array math throughout the package | [#52][52] (re-evaluation) | Approval pending |
-| PyArrow | `>=17` (`dataset` extra) | 26.0.0 | Apache-2.0 | Reading and writing the dataset's Parquet files | [#45][45] | Approval pending; condition on the floor, see the [vulnerability log](vulnerability-log.md) |
+| PyArrow | `>=17` (`dataset` extra) | 26.0.0 | Apache-2.0 | Reading and writing the dataset's Parquet files | [#45][45] | Decided: raise the floor to `>=23.0.1` ([PR #75](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/75)), see the [vulnerability log](vulnerability-log.md) |
 | PyYAML | `>=6` (`dataset` extra) | 6.0.3 | MIT | `metadata.yaml` and the check criteria, loaded with `SafeLoader` only | [#46][46] | Approval pending |
 
 ## External programs
@@ -25,7 +25,7 @@ Installed by the user, run as a separate process, and not distributed by us.
 
 | Component | Accepted | License | Used for | Evaluation | Status |
 |---|---|---|---|---|---|
-| FFmpeg | an `ffmpeg` with the `libsvtav1` encoder and an AV1 decoder | LGPL-2.1-or-later, or GPL-2.0-or-later as most builds are (review required) | Encoding and decoding the dataset's RGB videos | [#47][47] | Approval pending |
+| FFmpeg | an `ffmpeg` with the `libsvtav1` encoder and an AV1 decoder | LGPL-2.1-or-later, or GPL-2.0-or-later as most builds are (review required) | Encoding and decoding the dataset's RGB videos | [#47][47] | Approved 2026-10-27 |
 
 ## Build, test and CI
 
@@ -36,10 +36,10 @@ Not installed with the package and not distributed.
 | setuptools | `>=77` (`[build-system]`) | 84.2.1 | MIT | Build backend | [#66][66] | Approval pending; condition on the floor |
 | build | `==1.6.1` | 1.6.1 | MIT | Building the sdist and wheel in CI and releases | [#66][66] | Approval pending |
 | twine | `==7.0.0` | 7.0.0 | Apache-2.0 | `twine check --strict` before the PyPI upload | [#66][66] | Approval pending |
-| pytest | `>=8` (`dev` extra) | 9.1.1 | MIT | Tests | [#50][50] | Approval pending; condition on the floor |
+| pytest | `>=9.0.3` (`dev` extra) | 9.1.1 | MIT | Tests | [#50][50] | Approval pending; the floor condition is met ([PR #54](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/54)) |
 | pytest-cov, coverage | `>=5` (`dev` extra) | 7.1.0, 7.17.0 | MIT, Apache-2.0 | Test coverage | [#50][50] | Approval pending |
 | Ruff | `==0.17.1` (`dev` extra) | 0.17.1 | MIT | Lint and format | [#49][49] | Approval pending |
-| REUSE | `==6.2.0` (CI only) | 6.2.0 | GPL-3.0-or-later (review required) | `reuse lint` | [#48][48] | Approval pending; CI only |
+| REUSE | `==6.2.0` (CI only) | 6.2.0 | GPL-3.0-or-later (review required) | `reuse lint` | [#48][48] | Approved 2026-10-27, CI only |
 
 ## GitHub Actions
 
