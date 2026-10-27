@@ -329,8 +329,8 @@ nothing else importable.
 `tools/check_dataset.py` tests a dataset against the four items of the dataset test, with the
 acceptance values of `tools/check_criteria.yaml`. It is this package's
 `openphysgraspgen/dataset/check_dataset.py`, the same file that defines the format for the writer
-and finalize, and it needs only Python 3.10 or newer with NumPy 1.26, PyArrow 17 and PyYAML 6 or
-newer: nothing from this package, and no video decoder.
+and finalize, and it needs only Python 3.10 or newer with NumPy 1.26, PyArrow 23.0.1 and PyYAML 6
+or newer: nothing from this package, and no video decoder.
 
 ### Running it
 

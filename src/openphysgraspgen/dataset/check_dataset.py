@@ -1267,8 +1267,8 @@ BYTES_PER_READ = 1 << 24
 # A sha256sum line, in text (<hash>  <path>) or binary (<hash> *<path>) mode.
 CHECKSUM_LINE = re.compile(r"([0-9a-fA-F]{64}) [ *](.+)")
 LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
-# The oldest versions the tests run on.
-MIN_VERSIONS = (("NumPy", (1, 26)), ("PyArrow", (17, 0)), ("PyYAML", (6, 0)))
+# The oldest versions the tests run on. PyArrow before 23.0.1 has CVE-2026-25087.
+MIN_VERSIONS = (("NumPy", (1, 26)), ("PyArrow", (23, 0, 1)), ("PyYAML", (6, 0)))
 PROGRESS_SECONDS = 30.0
 # Where the format puts each kind of data file.
 SHAPES = {
@@ -4495,7 +4495,7 @@ def _report_path_problem(target: Path) -> str | None:
 
 
 def _version(text: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in re.findall(r"\d+", text)[:2])
+    return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
 
 
 def check_environment() -> None:
