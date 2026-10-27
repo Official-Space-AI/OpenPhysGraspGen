@@ -59,6 +59,10 @@ RUN printf '%s\n' \
     "  GPL-3.0-or-later with the GCC Runtime Library Exception 3.1, and libquadmath," \
     "  LGPL-2.1-or-later. Their source is part of GCC (https://gcc.gnu.org)." \
     "" \
+    "Source archive: the GitHub release of this image's version attaches the source of all" \
+    "of these components as openphysgraspgen-image-<version>-sources.tar, at" \
+    "https://github.com/Official-Space-AI/OpenPhysGraspGen/releases." \
+    "" \
     "Written offer: for at least three years after we last distribute this image, SpaceAI" \
     "(주식회사 스페이스에이아이) will give anyone who asks a complete machine-readable copy" \
     "of the corresponding source of any component of this image under the GPL, the LGPL," \

@@ -46,6 +46,10 @@ because that is the import name of the project's internal solver package (#28).
    step 2: the run scans with a newer vulnerability database than the `main` run did. The run
    asks for the approval only after the build and the image have passed every check. Then
    check that the release page has the seven assets and that the image is in the registry.
+4. Attach the image's source to the release as `openphysgraspgen-image-<version>-sources.tar`,
+   built as described under "Answering a source request", with a `SHA256SUMS` inside it.
+   `NOTICE.container` in the image points there. Until #73 adds this to the release
+   workflow, a maintainer builds and attaches it by hand.
 
 ## When a release run fails
 
@@ -200,36 +204,49 @@ we last distribute an image, SpaceAI gives anyone who asks a complete machine-re
 of the corresponding source of its components under the GPL, the LGPL, the MPL-2.0 or
 another license that requires source availability. Requests come to oss.spaceai@gmail.com.
 The maintainers answer within 30 days and charge nothing beyond the cost of physically
-performing the distribution; a download link costs nothing.
+performing the distribution; a download link costs nothing. From 1.0.0rc1 on, each release
+also attaches the image's source as `openphysgraspgen-image-<version>-sources.tar`, so a
+link to it answers most requests.
 
 To produce the source for an image, by tag or digest:
 
-1. List the Debian source packages and their versions in the image. The image SBOM on the
-   release lists the binary packages; this gives the sources they were built from:
+1. List the Debian source packages and their versions in the image, with the sources that
+   the `Built-Using` and `Static-Built-Using` fields name: those are compiled into a binary
+   package, such as rustc and the Rust crates in `sqv`. The image SBOM on the release lists
+   the binary packages; this gives the sources, which differ between architectures:
 
    ```sh
-   docker run --rm --entrypoint dpkg-query ghcr.io/official-space-ai/openphysgraspgen:1.0.0rc1 \
-     -W -f '${source:Package} ${source:Version}\n' | sort -u
+   image=ghcr.io/official-space-ai/openphysgraspgen:1.0.0rc1
+   query() { docker run --rm --platform linux/amd64 --entrypoint dpkg-query "$image" -W -f "$1"; }
+   {
+     query '${source:Package} ${source:Version}\n'
+     query '${Built-Using},${Static-Built-Using},\n' |
+       tr ',' '\n' | sed -n 's/^ *\([^ ]*\) (= \(.*\))$/\1 \2/p'
+   } | sort -u
    ```
 
 2. Download each source package at that version, with `apt-get source <package>=<version>`
    from deb.debian.org (`deb-src` entries for trixie, trixie-updates and trixie-security)
    while the version is current there, and otherwise from snapshot.debian.org
-   (`https://snapshot.debian.org/package/<package>/<version>/`).
+   (`https://snapshot.debian.org/package/<package>/<version>/`). Check each one's files
+   against its `.dsc` with `dscverify --no-sig-check`.
 3. Add `Python-<version>.tar.xz` from python.org, with the version `NOTICE.container` names,
-   and the docker-library Dockerfile at the commit it links.
-4. For libgfortran and libquadmath in `numpy.libs`, add the source of the GCC release they
-   were built from (https://gcc.gnu.org). NumPy's wheels take them from their manylinux
-   build image; that NumPy version's wheel build names the image and its GCC.
+   checked against `PYTHON_SHA256` in the docker-library Dockerfile at the commit it links,
+   and that Dockerfile.
+4. For libgfortran and libquadmath in `numpy.libs`, add the source of the GCC build they
+   come from. NumPy's wheels take them from their manylinux build image, and each file
+   names its build in its debug link: `strings` shows
+   `libgfortran.so.5.0.0-8.5.0-28.el8_10.alma.1.x86_64.debug` for NumPy 2.5.4, that is
+   AlmaLinux 8.10's gcc 8.5.0-28, whose source RPM is in AlmaLinux's vault
+   (https://vault.almalinux.org/).
 5. Send the files or a link to them, and keep the request and the answer.
 
 For the components under GPL-3.0 or LGPL-3.0, such as bash and coreutils, a download is
 conveyed under GPLv3 section 6(d): the source may be on another server when clear
 directions next to the image say where it is, and we stay responsible for it being
-available. `NOTICE.container` gives those directions to Debian's snapshot archive, and the
-written offer covers the rest. Publishing these sources next to each image, so that the
-image does not depend on Debian's archive and the written offer is only a backup, is
-planned in #73.
+available. `NOTICE.container` points to the sources archive on the release and to Debian's
+snapshot archive, and the written offer covers the rest. #73 builds the archive in the
+release workflow and checks on pull requests that every source in the image can be found.
 
 ## One-time setup
 
@@ -239,5 +256,6 @@ planned in #73.
   publishing settings.
 - The repository has an environment `pypi` that only `v*` tags can deploy to, with a required
   reviewer, so every upload waits for a maintainer's approval.
-- After the first image is pushed, make the `openphysgraspgen` container package public in the
-  organization's package settings and link it to this repository.
+- After the first image is pushed and its sources archive is on the release, make the
+  `openphysgraspgen` container package public in the organization's package settings and
+  link it to this repository. A public package cannot be made private again.
