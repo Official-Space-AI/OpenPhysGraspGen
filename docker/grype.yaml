@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
+# SPDX-License-Identifier: Apache-2.0
+#
+# Assessed exceptions to the image's vulnerability gate, the step "Scan the image SBOM
+# for fixable vulnerabilities" in .github/workflows/image.yml. Only that step reads this
+# file, so the recorded Grype report still lists every finding.
+#
+# An entry is for a finding of severity high or above that Grype counts as fixed but that
+# no digest of python:3.12-slim-trixie clears, such as a CPython advisory matched by a CPE
+# range without a 3.12 bound, or one in the pip that comes with the base image. It names
+# the vulnerability, the package and its exact version, so it stops matching when a new
+# digest changes the version, and its reason links the issue with the assessment. Add one
+# only in a reviewed pull request, as RELEASING.md describes under "Findings without a
+# fix". For example:
+#
+#   - vulnerability: CVE-YYYY-NNNNN
+#     package:
+#       name: python
+#       version: 3.12.13
+#     reason: "No 3.12 release fixes it; assessed in #NN"
+ignore: []

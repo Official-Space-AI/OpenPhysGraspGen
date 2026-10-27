@@ -16,7 +16,7 @@ Releases are cut by pushing a version tag. The `Release` workflow
    `.github/scripts/complete_image_sbom.py` (the licenses Syft cannot read and the libraries
    bundled in the NumPy wheel), records every known vulnerability in a Grype report, and
    fails if a package has no license or if a known vulnerability of severity high or above
-   has a fix,
+   has a fix and is not one of the assessed exceptions in `docker/grype.yaml`,
 6. only then publishes the sdist and wheel to PyPI as `openphysgraspgen`,
 7. attests the build provenance and the SBOM, and creates a GitHub release with the sdist,
    wheel, the three SBOMs, `SHA256SUMS` and the image's Grype report attached. Tags ending in
@@ -41,9 +41,11 @@ because that is the import name of the project's internal solver package (#28).
    git push origin v1.0.0rc1
    ```
 
-3. Approve the `pypi` environment deployment when the run asks for it, which it does only
-   after the build and the image have passed every check. Then check that the release page
-   has the seven assets and that the image is in the registry.
+3. Before approving the `pypi` environment deployment, open this run's `image-scan` artifact
+   and check that every finding of severity high or above without a fix is assessed, as in
+   step 2: the run scans with a newer vulnerability database than the `main` run did. The run
+   asks for the approval only after the build and the image have passed every check. Then
+   check that the release page has the seven assets and that the image is in the registry.
 
 ## When a release run fails
 
@@ -168,11 +170,28 @@ issue labelled `re-evaluation`:
 
 Record the decisions on the lower findings in an issue labelled `re-evaluation`; the
 quarterly one reviews all findings without a fix again. Each release attaches the full
-Grype report. The libraries in `numpy.libs` are listed in the image SBOM under their file
-names and without a version on purpose. Their files carry no version, and Grype would match
-a package without a version to every advisory for its name, so it matches none to them;
-their advisories (OpenBLAS, libgfortran, libquadmath) are checked by hand in the quarterly
-issue, for the NumPy version in `docker/requirements.txt`.
+Grype report.
+
+Some findings count as fixed although no digest of `python:3.12-slim-trixie` clears them:
+Grype matches CPython by CPE against NVD ranges that often have no 3.12 bound, and the pip
+that comes with the base image is fixed only in a later pip. When one of severity high or
+above stops the gate, assess it as above in an issue labelled `re-evaluation`, and then add
+an entry to `docker/grype.yaml` in a reviewed pull request: the vulnerability, the package
+name and its exact version, and a reason that links the issue. Only the gate reads that
+file, so the report still lists the finding, and an entry stops matching when a new digest
+changes the version. A release whose gate stopped is then cut again as described under
+"When a release run fails".
+
+Two kinds of bundled libraries are out of reach of the automated matching, and their
+advisories are checked by hand in the quarterly issue and in the review of every pull
+request that changes NumPy or PyArrow in `docker/requirements.txt`:
+
+- The libraries in `numpy.libs` (OpenBLAS, libgfortran, libquadmath) are listed in the image
+  SBOM under their file names and without a version on purpose. Their files carry no
+  version, and Grype would match a package without a version to every advisory for its
+  name, so it matches none to them.
+- The zlib that the PyArrow wheel links into its own libraries is in no SBOM. PyArrow
+  26.0.0 carries zlib 1.3.2, which #72 assessed as not affected by CVE-2026-85091.
 
 ## Answering a source request
 
@@ -204,8 +223,13 @@ To produce the source for an image, by tag or digest:
    build image; that NumPy version's wheel build names the image and its GCC.
 5. Send the files or a link to them, and keep the request and the answer.
 
-Publishing these sources next to each image, so that the written offer is only a backup,
-is planned in #73.
+For the components under GPL-3.0 or LGPL-3.0, such as bash and coreutils, a download is
+conveyed under GPLv3 section 6(d): the source may be on another server when clear
+directions next to the image say where it is, and we stay responsible for it being
+available. `NOTICE.container` gives those directions to Debian's snapshot archive, and the
+written offer covers the rest. Publishing these sources next to each image, so that the
+image does not depend on Debian's archive and the written offer is only a backup, is
+planned in #73.
 
 ## One-time setup
 

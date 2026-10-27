@@ -51,5 +51,7 @@ image does not contain or never runs is recorded as not affected, with the reaso
 and any other is accepted only until a stated date, when it is assessed again. The
 quarterly `re-evaluation` issue reviews all of them again. The full Grype report is
 attached to each release. The libraries that NumPy bundles in `numpy.libs` carry no
-version in the image SBOM on purpose, so automated matching skips them; their
-advisories are checked by hand in the quarterly issue.
+version in the image SBOM on purpose, and the zlib that PyArrow links into its own
+libraries is in no SBOM, so automated matching skips both; their advisories are
+checked by hand in the quarterly issue and whenever the image's NumPy or PyArrow
+changes.
