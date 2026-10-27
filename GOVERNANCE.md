@@ -48,7 +48,7 @@ reports and security issues.
 
 PhysGraspGen is developed as open core. The boundary is:
 
-| Published here (Apache-2.0) | Published on Hugging Face (CC-BY-4.0) | Not published |
+| Published here (Apache-2.0) | Published on Hugging Face (CC-BY-NC-4.0) | Not published |
 |---|---|---|
 | Constitutive laws, contact sensors, data recorder, calibration and transfer pipeline, benchmarks, examples, documentation | Grasp dataset and its dataset card | High-precision solver core; raw measurement data, material cards and tuning parameters; the production data pipeline; customer data and customer-specific code; internal infrastructure |
 
