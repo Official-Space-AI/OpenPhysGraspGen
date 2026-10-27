@@ -252,7 +252,7 @@ or ignore them.
 |---|---|
 | `format`, `format_version`, `name`, `version` | format and dataset identity |
 | `license`, `doi`, `download_url` | CC-BY-4.0; the Zenodo DOI as a bare DOI, `10.<registrant>/<suffix>` with a registrant code of 4 to 9 digits, without `https://doi.org/`; the download page, an `https://` URL. `doi` and `download_url` are null until given |
-| `created` | when the file was written (UTC) |
+| `created` | when the file was written, in UTC to the second, as a string: `YYYY-MM-DDTHH:MM:SSZ` |
 | `fps`, `recorded_fps`, `channels`, `cameras` | as in every episode |
 | `image_size` | per camera: `height`, `width` |
 | `video` | the encoder settings every episode shares, and `ffmpeg_versions`, the distinct `ffmpeg_version` of the episodes; null without RGB |
@@ -262,6 +262,11 @@ or ignore them.
 | `tools` | `tools/check_dataset.py` and `tools/check_criteria.yaml`: `path`, `sha256`, `bytes` |
 | `conventions` | units, world frame, quaternion order, frame steps, the trajectory's rows, the video clock, camera model and axes, images, depth, stress, the deformation gradient's reference configuration, and `segmentation_classes` (null without segmentation) |
 | `provenance` | `generation` and `export`: the distinct provenance records the episodes carry |
+
+`metadata.yaml` holds these keys and no others: at the top, in `counts`, in a type's entry and in
+an entry of `files` (`n_frames` for a frames file or a video, `n_steps` for a trajectory) or
+`tools`. The check counts every other key as a mismatch, as nothing compares what it states with
+the files.
 
 `SHA256SUMS` lists every entry of `files` and `tools` as `<sha256>  <path>`, in path order, as
 `sha256sum -c` reads it. The check reads `metadata.yaml` and the criteria file only when neither
@@ -356,7 +361,7 @@ run the script without `-I`, since it drops its own folder from the path either 
 | `--seed N` | the tester's seed, which draws the consistency samples; required when that item runs |
 | `--json PATH` | also write the whole report as JSON |
 | `--workers N` | threads that hash and read the files (default: the CPU count, at most 8) |
-| `--only ITEMS` | comma-separated items to run, from `scale,metadata,consistency,diversity` |
+| `--only ITEMS` | comma-separated items to run, from `scale,metadata,consistency,diversity`; a run of fewer than the four is partial: its `complete` is false |
 | `--criteria PATH` | other acceptance values; a run passes only with the published file |
 | `--sample N` | frames in each consistency sample; one smaller than the criteria's passes only when it holds every candidate frame |
 | `--no-checksums` | read every file without comparing its sha256; the metadata item cannot pass |
@@ -375,9 +380,9 @@ files, are ignored and listed in the report.
 | Item | Passes when | Published values |
 |---|---|---|
 | scale | no data file breaks a rule, and the frames of the episodes whose files are all clean reach the minimum | `min_frames` 1,000,000 |
-| metadata | nothing `metadata.yaml` states disagrees with the files: counts, object types, channels, conventions, each episode's shared values, each file's kind, size, count, identity and sha256, the tools and `SHA256SUMS`. And the specification holds: the required channels and cameras in every episode, the licence, a DOI and an `https://` download URL | `max_mismatches` 0; the six channels, `front` and `wrist`, `CC-BY-4.0` |
+| metadata | nothing `metadata.yaml` states disagrees with the files: counts, object types, channels, conventions, each episode's shared values, each file's kind, size, count, identity and sha256, the tools and `SHA256SUMS`; it holds no key the format does not define, and `created` is a time in UTC. And the specification holds: the required channels and cameras in every episode, the licence, a DOI and an `https://` download URL | `max_mismatches` 0; the six channels, `front` and `wrist`, `CC-BY-4.0` |
 | consistency | every frame's layers carry the frame's own step and its videos hold it at its index (the step part), and on a sample drawn with the seed from the frames whose contacts press on the robot, those contact points projected through each camera land within a tolerance of the object's mask (the projection) | `min_pass_fraction` 1.0 for both parts, of the layers `rgb`, `depth`, `force`, `stress`; a sample of 1,000 from at least 1,000 such frames; 4 px |
-| diversity | the object types reach the minimum, and no frames file is unread or untyped, no two types are one in lower case, no asset or episode is under two types, and every episode's `facts` hold the required kinds; a table per variable of the facts, the types and the labels is reported | `min_object_types` 10; `material`, `placement`, `lighting`, `camera` |
+| diversity | the object types of the episodes whose files are all clean, those scale counts, reach the minimum, and no frames file is unread or untyped, no two types are one in lower case, no asset or episode is under two types, and every episode's `facts` hold the required kinds. The types of every frames file read are counted beside them, and a table per variable of the facts, the types and the labels of the files read is reported | `min_object_types` 10; `material`, `placement`, `lighting`, `camera` |
 
 The samples: a frame's key is the first 8 bytes of the sha256 of `<seed> NUL <purpose> NUL
 <path> NUL <frame>`, and the frames of the smallest keys are the sample, so one seed draws the
@@ -396,6 +401,17 @@ not hashed by the dataset; the report prints its sha256 to compare with the one 
 publishes. The specification fails until the dataset is published, as finalize writes `doi` and
 `download_url` as null until they are given.
 
+A pass says that the dataset meets the criteria it was published with, which finalize's
+`criteria=` can make weaker than the test. So beside whether the criteria are the published ones,
+the report says whether they are at least as strict as the dataset test, as
+`meets_test_definition`: `min_frames` of at least 1,000,000, `max_mismatches` of 0, a
+`min_pass_fraction` of 1.0 on at least the layers `rgb`, `depth`, `force` and `stress`, a
+`min_point_fraction` of 1.0, and `min_object_types` of at least 10. These are the values the test
+gives, and the only ones compared, so a yes says nothing of the others: `projection_radius_px`, a
+placeholder until it is agreed, the sample sizes `sample_frames` and `min_contact_frames`, the
+specification's channels, cameras and licence, and `required_fact_kinds`. It changes neither the
+verdict nor the exit status.
+
 ### What it prints
 
 A table, the listings of what failed (the first 50 of each; the JSON report holds them all), the
@@ -405,30 +421,32 @@ diversity tables, and a last line that a program reads:
 physgraspgen-public 2.0 dataset check
 root: /data/physgraspgen-dataset
 metadata.yaml: sha256 8ed4b2834fb12ee20394237981321dded26c02b3c05df04276403835cb553879
-criteria: /data/physgraspgen-dataset/tools/check_criteria.yaml (sha256 693e6253e768b0c8; the published one: yes)
+criteria: /data/physgraspgen-dataset/tools/check_criteria.yaml (sha256 693e6253e768b0c8; the published one: yes; at least as strict as the test: NO)
 script: /data/physgraspgen-dataset/tools/check_dataset.py (sha256 c66e0e133da35f5b; the published one: yes)
 items run: scale, metadata, consistency (not run: diversity)
 
 Item                  Measured                                                             Criterion                      Result
 scale                 10 frames in 4 episodes (16 files)                                   >= 10 frames                   PASS
-metadata              0 mismatches in 184 comparisons                                      <= 0 mismatches, and spec      FAIL
+metadata              0 mismatches in 185 comparisons                                      <= 0 mismatches, and spec      FAIL
   spec (in metadata)  6 of 6 GT channels, cameras front, wrist; failed: doi, download_url  6 channels, front, wrist, ...  FAIL
 consistency           steps 10/10 frames (100.00 %), sample 5/5; projection 5/5 of ...     100 % of frames; ...           PASS
 
-Overall: FAIL for the items run; not run: diversity
-RESULT {"pass": false, "items_run": ["scale", "metadata", "consistency"], "criteria": {...}, ...}
+Overall: FAIL (a partial run: diversity not run)
+RESULT {"pass": false, "complete": false, "items_run": ["scale", "metadata", "consistency"], ...}
 ```
 
-The `RESULT` line holds the verdict, the items run, the criteria's and the script's sha256 and
-whether each is the published one, the sha256 of `metadata.yaml`, and each item's headline
-numbers. Progress lines (`hashing:`, `reading:`, `projecting:`) and warnings go to standard error.
-The JSON report is strict JSON: a value JSON cannot hold, such as a NaN in `metadata.yaml`, is
-written as a string.
+The `RESULT` line holds the verdict, `complete` (whether all four items ran), the items run, the
+criteria's and the script's sha256 and whether each is the published one, the criteria's
+`meets_test_definition`, the sha256 of `metadata.yaml`, and each item's headline numbers and
+`criterion`, the values it applied. The last line of the table names a partial run too. Progress
+lines (`hashing:`, `reading:`, `projecting:`) and warnings go to standard error. The JSON report
+is strict JSON: a value JSON cannot hold, such as a NaN in `metadata.yaml`, is written as a
+string.
 
 | Exit status | Meaning |
 |---|---|
-| 0 | every item run passed, with the published criteria and script |
-| 1 | the run completed and failed: an item failed, the criteria or the script are not the published ones, or `--no-checksums` was given with the metadata item |
+| 0 | every item run passed, with the published criteria and script. A run of fewer than the four items (`--only`) can exit 0: its `complete` is false |
+| 1 | the run finished and failed: an item failed, the criteria or the script are not the published ones, or `--no-checksums` was given with the metadata item |
 | 2 | the check could not run, or its report could not be written: a usage error, a missing or invalid criteria file or `metadata.yaml`, criteria values an item cannot apply, a dependency or Python too old, an interrupt, or a machine out of memory or file descriptors. The `RESULT` line gives the reason |
 
 Hashing reads every byte once. Reading decodes every column, about 1.6 ms a frame at 480 x 640

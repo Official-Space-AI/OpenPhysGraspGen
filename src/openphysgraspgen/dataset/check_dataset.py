@@ -26,7 +26,7 @@ applied to every value. Video frames are counted from the MP4 index, without a d
 A run passes only with the script and the criteria file metadata.yaml lists. It prints
 a table and a ``RESULT {...}`` line, writes the whole report as JSON with ``--json``,
 and exits 0 when every item run passed, 1 when the run failed, and 2 when the check
-could not run.
+could not run; the RESULT line's complete says whether all four items ran.
 
 The same file defines the format: ``openphysgraspgen.dataset`` imports its names, value
 rules and file rules, so the writer, finalize and the check share one definition. The
@@ -75,6 +75,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
@@ -144,6 +145,49 @@ EPISODE_KEYS = (
     "source_n_frames",
     "source_cut_at_row",
 )
+# The keys of metadata.yaml as finalize writes it, of its counts, of a type's entry in
+# object_types, of a files entry (n_steps for a trajectory, n_frames for the others) and
+# of a tools entry. Any other key states what the check cannot compare: a mismatch.
+METADATA_KEYS = (
+    "format",
+    "format_version",
+    "name",
+    "version",
+    "license",
+    "doi",
+    "download_url",
+    "created",
+    "fps",
+    "recorded_fps",
+    "channels",
+    "cameras",
+    "image_size",
+    "video",
+    "counts",
+    "object_types",
+    "files",
+    "tools",
+    "conventions",
+    "provenance",
+)
+COUNT_KEYS = (
+    "n_frames",
+    "n_episodes",
+    "n_files",
+    "n_object_types",
+    "n_object_assets",
+    "n_channels",
+)
+OBJECT_TYPE_KEYS = ("n_episodes", "n_frames", "assets")
+FILE_ENTRY_KEYS = {
+    kind: ("path", "kind", "episode_uid", "object_type", count, "sha256", "bytes")
+    for kind, count in (
+        ("frames", "n_frames"),
+        ("trajectory", "n_steps"),
+        ("video", "n_frames"),
+    )
+}
+TOOL_ENTRY_KEYS = ("path", "sha256", "bytes")
 # Object types, episode ids and camera names become path components, which every file
 # system a copy lands on must hold: no trailing dot, no device name of Windows, and a
 # length that leaves room for the rest of the path.
@@ -155,9 +199,12 @@ RESERVED_NAMES = frozenset(
     + tuple(f"lpt{i}" for i in range(1, 10))
 )
 # metadata.yaml's doi is a bare DOI whose registrant code is 4 to 9 digits, as Zenodo's
-# is, and its download_url an https URL, in printable ASCII.
+# is, and its download_url an https URL, in printable ASCII. Its created is the time
+# finalize wrote it, in UTC to the second, as a string: YYYY-MM-DDTHH:MM:SSZ.
 DOI_PATTERN = re.compile(r"10\.[0-9]{4,9}/[!-~]+")
 URL_PATTERN = re.compile(r"https://[!-~]+")
+CREATED_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+CREATED_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 # A column is (dtype, shape). The shape is () for one value, a tuple of sizes for a
 # fixed-size list of that many values stored row-major, "image" for one value per
@@ -1364,6 +1411,59 @@ CRITERIA = {
         ("max_categories", lambda v: _is_int(v, 1), "an integer of at least 1"),
     ),
 }
+# The dataset test's own values (docs/dataset/format.md): at least 1,000,000 frames, no
+# mismatch, every frame of both consistency parts, the step part on these four layers
+# and every point a camera sees landing on the object, and at least 10 object types.
+# The criteria a dataset publishes may be weaker; the report says so. The test gives no
+# projection radius (4 px is a placeholder until agreed), sample size, specification or
+# fact kinds, so those are not compared.
+TEST_DEFINITION = {
+    "scale": {"min_frames": 1_000_000},
+    "metadata": {"max_mismatches": 0},
+    "consistency": {
+        "min_pass_fraction": 1.0,
+        "layers": ["rgb", "depth", "force", "stress"],
+        "min_point_fraction": 1.0,
+    },
+    "diversity": {"min_object_types": 10},
+}
+
+
+def meets_test_definition(criteria: Mapping[str, Any]) -> bool:
+    """Whether criteria are at least as strict as TEST_DEFINITION, whichever items run:
+    as many frames and object types or more, as many mismatches or fewer, as high a
+    pass fraction on the test's layers and any others, and as high a fraction of each
+    camera's points on the object. A value that is missing, or that its item could not
+    apply, meets nothing."""
+
+    def value(item: str, key: str) -> Any:
+        table = criteria.get(item)
+        return table.get(key) if isinstance(table, Mapping) else None
+
+    test = TEST_DEFINITION
+    mismatches = value("metadata", "max_mismatches")
+    layers = value("consistency", "layers")
+    return bool(
+        _is_int(value("scale", "min_frames"), test["scale"]["min_frames"])
+        and _is_int(mismatches, 0)
+        and mismatches <= test["metadata"]["max_mismatches"]
+        and _number(
+            value("consistency", "min_pass_fraction"),
+            test["consistency"]["min_pass_fraction"],
+            1,
+        )
+        and _names(layers, CHANNELS)
+        and set(test["consistency"]["layers"]) <= set(layers)
+        and _number(
+            value("consistency", "min_point_fraction"),
+            test["consistency"]["min_point_fraction"],
+            1,
+        )
+        and _is_int(
+            value("diversity", "min_object_types"),
+            test["diversity"]["min_object_types"],
+        )
+    )
 
 
 def validate_criteria(
@@ -2799,6 +2899,37 @@ class _Ledger:
         self.n_checked += 1
         self.items.append({"what": what, "metadata": metadata, "files": files})
 
+    def holds(self, what: str, metadata: Any, ok: bool) -> None:
+        """A value no file holds, held to its rule instead; what says how it breaks it."""
+        self.n_checked += 1
+        if not ok:
+            self.items.append({"what": what, "metadata": metadata, "files": None})
+
+    def extra(self, where: str, value: Any, keys: tuple[str, ...]) -> None:
+        """A mismatch for each key of the mapping value that the format does not define
+        there, with the value it states: nothing in the files is compared with it."""
+        if not isinstance(value, Mapping):
+            return
+        for key in value:
+            if key not in keys:
+                self.missing(
+                    f"{where}: key {_clip(repr(key))} is not in the format",
+                    value[key],
+                    None,
+                )
+
+
+def _is_created(value: object) -> bool:
+    """Whether value is a time that exists, as a string in UTC to the second:
+    YYYY-MM-DDTHH:MM:SSZ."""
+    if not isinstance(value, str) or not CREATED_PATTERN.fullmatch(value):
+        return False
+    try:
+        datetime.strptime(value, CREATED_FORMAT)
+    except ValueError:
+        return False
+    return True
+
 
 def _frames_files(ds: Dataset) -> list[DataFile]:
     return [rec for rec in ds.files if rec.kind == "frames" and rec.id is not None]
@@ -2864,11 +2995,18 @@ def check_metadata(
     ds: Dataset, metadata: Mapping[str, Any], criteria: Mapping[str, Any]
 ) -> dict[str, Any]:
     """metadata.yaml against the files: each value it states compared once, each
-    disagreement one mismatch, and the specification. Without checksums the sha256
-    comparisons are skipped and the item cannot pass."""
+    disagreement one mismatch, and the specification. Each key the format does not
+    define is a mismatch, and created, which no file holds, is held to its form.
+    Without checksums the sha256 comparisons are skipped and the item cannot pass."""
     ledger = _Ledger()
+    ledger.extra(METADATA_NAME, metadata, METADATA_KEYS)
     ledger.compare("format", metadata.get("format"), FORMAT)
     ledger.compare("format_version", metadata.get("format_version"), FORMAT_VERSION)
+    ledger.holds(
+        "created is not a time in UTC, YYYY-MM-DDTHH:MM:SSZ",
+        metadata.get("created"),
+        _is_created(metadata.get("created")),
+    )
     frames = _frames_files(ds)
     read = [rec for rec in frames if rec.footer is not None]
     counted = {
@@ -2886,6 +3024,7 @@ def check_metadata(
         c for c in CHANNELS if any(c in e.channels for e in ds.episodes.values())
     ]
     ledger.compare("counts.n_channels", counts.get("n_channels"), len(channels))
+    ledger.extra("counts", counts, COUNT_KEYS)
     ledger.compare("channels", metadata.get("channels"), channels)
     conventions = metadata.get("conventions")
     stated = conventions
@@ -2927,6 +3066,7 @@ def check_metadata(
             stated_row.get("assets"),
             sorted(row["assets"]),
         )
+        ledger.extra(f"object_types.{name}", stated_row, OBJECT_TYPE_KEYS)
 
     video = metadata.get("video")
     shared_video = video
@@ -2975,6 +3115,8 @@ def check_metadata(
         ledger.missing(problem, None, None)
     by_rel = {rec.rel: rec for rec in ds.files}
     for rel, entry in sorted(ds.listed.items()):
+        # A listed path is one the format defines, so its folder gives its kind.
+        ledger.extra(rel, entry, FILE_ENTRY_KEYS[_shape(rel)[0]])
         rec = by_rel.get(rel)
         if rec is None:
             ledger.missing(f"files: {rel} is listed but not on disk", rel, None)
@@ -3004,6 +3146,7 @@ def check_metadata(
         if rel not in ds.tools:
             ledger.missing(f"tools: {rel} is not listed", None, rel)
     for rel, entry in sorted(ds.tools.items()):
+        ledger.extra(rel, entry, TOOL_ENTRY_KEYS)
         if rel not in TOOL_FILES:
             ledger.missing(f"tools: {rel} is not a tool of the format", rel, None)
             continue
@@ -3430,7 +3573,8 @@ def _project_file(
 ) -> list[dict[str, Any]]:
     """project_frame for a file's sampled frames, the file opened once and only the row
     groups that hold them read, frames_per_read frames at a time. What one frame raises
-    fails that frame."""
+    fails that frame, and what reading the file raises fails its frames; running out of
+    memory or file descriptors stops the run instead."""
 
     def failure(what: str, exc: Exception) -> dict[str, Any]:
         return {
@@ -3492,6 +3636,9 @@ def _project_file(
                             out[i] = failure("the frame could not be projected", exc)
                     first = last
             return [out[i] for i in frames]
+    except CheckError:
+        # failure() found the machine out of memory or file descriptors: the run stops.
+        raise
     except Exception as exc:  # noqa: BLE001, it fails the file's frames
         return [failure("the file cannot be read", exc) for _ in frames]
 
@@ -3830,9 +3977,11 @@ def check_diversity(ds: Dataset, criteria: Mapping[str, Any]) -> dict[str, Any]:
     """The object types, and a distribution table per variable of the episodes' facts.
 
     A type is a frames file's footer object_type, which must be the type of its path.
-    The item fails when a frames file was not read, has no valid type, when two types
-    are one after lower-casing, one asset is under two types, one episode is in two
-    files, or a file's facts lack a required kind.
+    The minimum counts the types of the episodes whose files are all clean, as scale
+    counts their frames; the types of every frames file read are reported beside them,
+    and the tables are of every frames file read. The item fails when a frames file was
+    not read, has no valid type, when two types are one after lower-casing, one asset is
+    under two types, one episode is in two files, or a file's facts lack a required kind.
     """
     minimum = criteria["min_object_types"]
     kinds = list(criteria["required_fact_kinds"])
@@ -3848,6 +3997,8 @@ def check_diversity(ds: Dataset, criteria: Mapping[str, Any]) -> dict[str, Any]:
 
     typed = [rec for rec in read if label(rec) is not None]
     without_type = [rec.rel for rec in read if label(rec) is None]
+    clean_episodes = {e.frames.rel for e in ds.episodes.values() if not e.has_errors}
+    counted = {label(rec) for rec in typed if rec.rel in clean_episodes}
     spellings: dict[str, set[str]] = {}
     assets: dict[str, set[str]] = {}
     episodes: dict[str, list[str]] = {}
@@ -3932,8 +4083,9 @@ def check_diversity(ds: Dataset, criteria: Mapping[str, Any]) -> dict[str, Any]:
         or missing_facts
     )
     return {
-        "pass": clean and len(object_types) >= minimum,
-        "n_object_types": len(object_types),
+        "pass": clean and len(counted) >= minimum,
+        "n_object_types": len(counted),
+        "n_object_types_read": len(object_types),
         "object_types": object_types,
         "criterion": {"min_object_types": minimum, "required_fact_kinds": kinds},
         "files_not_read": not_read,
@@ -3959,7 +4111,8 @@ def check_published_tools(
 ) -> dict[str, Any]:
     """Whether this run applies the criteria file and runs the script whose sha256
     metadata.yaml lists. The digests are those of the bytes this run read: the criteria
-    file's when it was loaded, the script's when the run began."""
+    file's when it was loaded, the script's when the run began. Beside them, and not in
+    the verdict, whether the criteria are at least as strict as the test's own values."""
     stated = {
         rel: str(ds.tools[rel].get("sha256", "")).lower() if rel in ds.tools else None
         for rel in TOOL_FILES
@@ -3982,6 +4135,7 @@ def check_published_tools(
             "sha256": criteria_sha256,
             "published_sha256": stated[criteria_rel],
             "matches_published": bool(same),
+            "meets_test_definition": meets_test_definition(criteria),
         },
         "script": {
             "path": str(Path(__file__).resolve()),
@@ -4024,7 +4178,8 @@ def run_checks(
     """Run the items and return the report, which --json writes.
 
     The verdict needs every item run to pass and the run to apply the criteria file and
-    run the script that metadata.yaml publishes. criteria_path is the file the criteria
+    run the script that metadata.yaml publishes, and a run of fewer than the four items
+    can pass: complete says whether all four ran. criteria_path is the file the criteria
     were read from, and criteria_sha256 the digest of the bytes they were read from;
     given a path alone, the file is read, and its digest counts only when it holds the
     criteria. Without a path the criteria must equal the dataset's own. seed, the
@@ -4086,6 +4241,7 @@ def run_checks(
     )
     return {
         "pass": all(r["pass"] for r in results.values()) and published["pass"],
+        "complete": list(results) == list(ITEMS),
         "root": str(root),
         "format": FORMAT,
         "format_version": FORMAT_VERSION,
@@ -4155,8 +4311,11 @@ def _measured(item: str, r: Mapping[str, Any]) -> tuple[str, str]:
         )
         if r[key]
     )
+    types = f"{r['n_object_types']} object types"
+    if r["n_object_types_read"] != r["n_object_types"]:
+        types += f" in clean episodes ({r['n_object_types_read']} in the files read)"
     return (
-        f"{r['n_object_types']} object types, {len(r['tables'])} variable tables"
+        f"{types}, {len(r['tables'])} variable tables"
         + (f"; {problems} kind(s) of problem below" if problems else ""),
         (
             f">= {r['criterion']['min_object_types']} object types; facts "
@@ -4262,9 +4421,14 @@ def format_table(report: Mapping[str, Any]) -> str:
     ]
     for key in ("criteria", "script"):
         p = published[key]
+        strict = ""
+        if key == "criteria":
+            strict = "; at least as strict as the test: " + (
+                "yes" if p["meets_test_definition"] else "NO"
+            )
         lines.append(
             f"{key}: {p['path']} (sha256 {(p['sha256'] or '?')[:16]}; the published "
-            f"one: {'yes' if p['matches_published'] else 'NO'})"
+            f"one: {'yes' if p['matches_published'] else 'NO'}{strict})"
         )
     lines.append(
         "items run: "
@@ -4303,23 +4467,34 @@ def format_table(report: Mapping[str, Any]) -> str:
                 lines.append(f"  {json.dumps(jsonable(entry), ensure_ascii=True)}")
     if "diversity" in report["items"]:
         lines += _diversity_lines(report["items"]["diversity"])
-    verdict = "PASS" if report["pass"] else "FAIL"
+    notes = []
     if not published["pass"]:
-        verdict += (
-            " (the criteria or the script are not the ones metadata.yaml publishes)"
+        notes.append(
+            "the criteria or the script are not the ones metadata.yaml publishes"
         )
-    elif report["items_not_run"]:
-        verdict += f" for the items run; not run: {', '.join(report['items_not_run'])}"
+    if not report["complete"]:
+        notes.append(f"a partial run: {', '.join(report['items_not_run'])} not run")
+    verdict = "PASS" if report["pass"] else "FAIL"
+    if notes:
+        verdict += f" ({'; '.join(notes)})"
     lines += ["", f"Overall: {verdict}"]
     return "\n".join(lines)
 
 
 def summary(report: Mapping[str, Any]) -> dict[str, Any]:
-    """The RESULT line's payload: the verdict and each item's headline numbers."""
-    out: dict[str, Any] = {"pass": report["pass"], "items_run": report["items_run"]}
+    """The RESULT line's payload: the verdict, whether every item ran, the tools and
+    whether the criteria meet the test's own values, and each item's headline numbers
+    and the criterion it applied."""
+    out: dict[str, Any] = {
+        "pass": report["pass"],
+        "complete": report["complete"],
+        "items_run": report["items_run"],
+    }
     for key in ("criteria", "script"):
         p = report["published_tools"][key]
         out[key] = {"sha256": p["sha256"], "matches_published": p["matches_published"]}
+        if key == "criteria":
+            out[key]["meets_test_definition"] = p["meets_test_definition"]
     out["metadata_yaml"] = {"sha256": report["dataset"]["metadata_sha256"]}
     for item, r in report["items"].items():
         if item == "scale":
@@ -4361,9 +4536,6 @@ def summary(report: Mapping[str, Any]) -> dict[str, Any]:
                         "statuses",
                     )
                 },
-                "projection_tolerance_provenance": r["criterion"][
-                    "projection_tolerance_provenance"
-                ],
             }
         else:
             out[item] = {
@@ -4373,6 +4545,8 @@ def summary(report: Mapping[str, Any]) -> dict[str, Any]:
                 "n_files_without_type": len(r["files_without_type"]),
                 "n_files_missing_facts": len(r["files_missing_facts"]),
             }
+        # The values applied, the projection tolerance's provenance among them.
+        out[item]["criterion"] = r["criterion"]
     return out
 
 
@@ -4425,7 +4599,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog=(
             "exit status: 0 every item run passed with the published criteria and "
-            "script; 1 the run completed and failed; 2 the check could not run"
+            "script (a run of fewer than the four items says complete: false); 1 the "
+            "run finished and failed; 2 the check could not run"
         ),
     )
     parser.add_argument(

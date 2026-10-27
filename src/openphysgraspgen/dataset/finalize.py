@@ -348,7 +348,7 @@ def finalize_dataset(
         "license": first["license"],
         "doi": doi,
         "download_url": download_url,
-        "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "created": datetime.now(timezone.utc).strftime(fmt.CREATED_FORMAT),
         "fps": first["fps"],
         "recorded_fps": first["recorded_fps"],
         "channels": first["channels"],

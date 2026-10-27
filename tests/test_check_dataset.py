@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -299,14 +300,14 @@ def only_pyarrow_numpy_yaml(tmp_path):
 
 
 def worked_count(n_types, n_episodes, n_files, rgb, checksums):
-    """The metadata item's comparisons on a clean dataset: format and version, five
-    counts, channels and their count, conventions, three per type, eleven per frames
-    file, the ffmpeg builds with rgb, provenance, per listed file six (five without
-    sha256), per tool two (one), and SHA256SUMS: its paths, then each path."""
+    """The metadata item's comparisons on a clean dataset: format, version and created,
+    five counts, channels and their count, conventions, three per type, eleven per
+    frames file, the ffmpeg builds with rgb, provenance, per listed file six (five
+    without sha256), per tool two (one), and SHA256SUMS: its paths, then each path."""
     per_file, per_tool = (6, 2) if checksums else (5, 1)
     sums = 1 + n_files + 2
     return (
-        2
+        3
         + 8
         + 3 * n_types
         + 11 * n_episodes
@@ -357,7 +358,8 @@ def test_a_complete_dataset_passes_every_item(root):
         # Every point lies on the object's near face, which the depth image shows.
         assert stats["depth_residual_m"]["max"] == 0.0
     diversity = items["diversity"]
-    assert diversity["n_object_types"] == N_TYPES
+    assert diversity["n_object_types"] == diversity["n_object_types_read"] == N_TYPES
+    assert f"  {N_TYPES} object types, " in fmt.format_table(report)
     assert diversity["labels"] == {
         "success": {"n_episodes": 4, "n_frames": 10, "frame_fraction": 1.0}
     }
@@ -422,7 +424,7 @@ def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_pat
     assert err.splitlines()[1].startswith(
         f"reading: {N_DATA_FILES}/{N_DATA_FILES} files"
     )
-    assert payload["pass"] is True
+    assert (payload["pass"], payload["complete"]) == (True, True)
     assert payload["items_run"] == list(fmt.ITEMS)
     assert payload["scale"] == {
         "pass": True,
@@ -430,14 +432,16 @@ def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_pat
         "n_episodes": N_EPISODES,
         "n_files": N_DATA_FILES,
         "n_files_with_errors": 0,
+        "criterion": {"min_frames": N_FRAMES},
     }
     assert payload["metadata"]["spec"]["n_channels"] == 6
     assert type(payload["consistency"]["projection"]["n_candidates"]) is int
-    assert payload["consistency"]["projection_tolerance_provenance"].startswith(
-        "placeholder: "
-    )
+    provenance = payload["consistency"]["criterion"]["projection_tolerance_provenance"]
+    assert provenance.startswith("placeholder: ")
     for key in ("criteria", "script"):
         assert payload[key]["matches_published"] is True
+    # The dataset's own criteria, which ten frames meet, are weaker than the test's.
+    assert payload["criteria"]["meets_test_definition"] is False
     digest = hashlib.sha256((root / "metadata.yaml").read_bytes()).hexdigest()
     assert payload["metadata_yaml"] == {"sha256": digest}
 
@@ -445,9 +449,10 @@ def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_pat
         raise ValueError(f"{text} in a strict JSON report")
 
     report = json.loads((tmp_path / "r").read_text(), parse_constant=strict)
-    assert report["pass"] is True
+    assert (report["pass"], report["complete"]) == (True, True)
     assert list(report) == [
         "pass",
+        "complete",
         "root",
         "format",
         "format_version",
@@ -461,6 +466,10 @@ def test_the_shipped_script_passes_the_dataset_as_a_tester_runs_it(root, tmp_pat
         "criteria",
     ]
     assert report["criteria"]["scale"] == {"min_frames": N_FRAMES}
+    # The RESULT line gives each item's criterion as the report does.
+    for item in fmt.ITEMS:
+        assert payload[item]["criterion"] == report["items"][item]["criterion"]
+    assert report["published_tools"]["criteria"]["meets_test_definition"] is False
     assert report["environment"]["pyarrow"] == pa.__version__
 
 
@@ -567,6 +576,46 @@ def test_the_package_ships_the_published_acceptance_values():
     criteria, _ = fmt.load_criteria(SCRIPT.with_name("check_criteria.yaml"))
     # As JSON text, 1 is not 1.0.
     assert json.dumps(criteria, sort_keys=True) == json.dumps(PUBLISHED, sort_keys=True)
+
+
+@pytest.mark.parametrize(
+    ("item", "key", "value", "meets"),
+    [
+        ("scale", "min_frames", 999_999, False),
+        ("scale", "min_frames", 2_000_000, True),
+        ("metadata", "max_mismatches", 1, False),
+        ("consistency", "min_pass_fraction", 0.999, False),
+        ("consistency", "min_pass_fraction", 1, True),
+        ("consistency", "layers", ["rgb", "depth", "force"], False),
+        ("consistency", "layers", list(fmt.CHANNELS), True),
+        ("consistency", "min_point_fraction", 0.999, False),
+        ("consistency", "min_point_fraction", 1, True),
+        ("diversity", "min_object_types", 9, False),
+        ("diversity", "min_object_types", 30, True),
+        # The test gives no tolerance of its own: it is to be agreed.
+        ("consistency", "projection_radius_px", 40.0, True),
+        # Nor a sample size, a specification or fact kinds: none of them is compared.
+        ("consistency", "sample_frames", 1, True),
+        ("consistency", "min_contact_frames", 0, True),
+        ("metadata", "required_channels", [], True),
+        ("diversity", "required_fact_kinds", [], True),
+        # A value no item could apply meets nothing, and raises nothing.
+        ("scale", "min_frames", "1000000", False),
+        ("scale", "min_frames", True, False),
+        ("metadata", "max_mismatches", None, False),
+        ("consistency", "layers", [["rgb"]], False),
+        ("diversity", "min_object_types", 10.0, False),
+    ],
+)
+def test_criteria_meet_the_test_definition_when_at_least_as_strict(
+    item, key, value, meets
+):
+    criteria = json.loads(json.dumps(PUBLISHED))
+    assert fmt.meets_test_definition(criteria)
+    criteria[item][key] = value
+    assert fmt.meets_test_definition(criteria) is meets
+    del criteria[item]
+    assert not fmt.meets_test_definition(criteria)
 
 
 BAD_CRITERIA = [
@@ -892,16 +941,19 @@ def test_the_verdict_is_printed_before_the_report_is_written(
     )
 
 
-def test_only_runs_the_items_named_in_their_order(root, capsys):
+def test_only_runs_the_items_named_in_their_order(root, capsys, tmp_path):
     code, out, _, payload = main(capsys, root, "--only", " diversity , scale ,scale")
+    # A partial run that passes exits 0, and says it is partial.
     assert code == 0
+    assert (payload["pass"], payload["complete"]) == (True, False)
     assert payload["items_run"] == ["scale", "diversity"]
     assert "items run: scale, diversity (not run: metadata, consistency)" in out
     assert out.splitlines()[-2] == (
-        "Overall: PASS for the items run; not run: metadata, consistency"
+        "Overall: PASS (a partial run: metadata, consistency not run)"
     )
     assert set(payload) == {
         "pass",
+        "complete",
         "items_run",
         "criteria",
         "script",
@@ -909,6 +961,14 @@ def test_only_runs_the_items_named_in_their_order(root, capsys):
         "scale",
         "diversity",
     }
+    # Other criteria do not hide that the run is partial.
+    other = criteria_file(tmp_path, (root / CRITERIA).read_text() + "\n")
+    code, out, _, payload = main(capsys, root, "--only", "scale", "--criteria", other)
+    assert (code, payload["pass"], payload["complete"]) == (1, False, False)
+    assert out.splitlines()[-2] == (
+        "Overall: FAIL (the criteria or the script are not the ones metadata.yaml "
+        "publishes; a partial run: metadata, consistency, diversity not run)"
+    )
 
 
 def test_no_checksums_warns_and_fails(root, capsys):
@@ -2243,6 +2303,47 @@ METADATA = [
         ["tools: tools/extra.py is not a tool of the format", "SHA256SUMS: paths"],
     ),
     (lambda m: m["tools"][1].update(bytes=0), [f"{CRITERIA}: bytes"]),
+    # A key the format does not define states what nothing compares.
+    (
+        lambda m: m.update(colour="red"),
+        ["metadata.yaml: key 'colour' is not in the format"],
+    ),
+    # Keys of any YAML type, in the file's order.
+    (
+        lambda m: m.update({1: "one", "check": {"pass": True}}),
+        [
+            "metadata.yaml: key 1 is not in the format",
+            "metadata.yaml: key 'check' is not in the format",
+        ],
+    ),
+    (
+        lambda m: m["counts"].update(n_videos=8),
+        ["counts: key 'n_videos' is not in the format"],
+    ),
+    (
+        lambda m: m["object_types"]["apple"].update(colour="red"),
+        ["object_types.apple: key 'colour' is not in the format"],
+    ),
+    (
+        lambda m: entry(APPLE)(m).update(n_steps=6),
+        [f"{APPLE}: key 'n_steps' is not in the format"],
+    ),
+    (
+        lambda m: entry(APPLE_TRAJECTORY)(m).update(n_frames=3),
+        [f"{APPLE_TRAJECTORY}: key 'n_frames' is not in the format"],
+    ),
+    (
+        lambda m: entry(APPLE_FRONT)(m).update(codec="av1"),
+        [f"{APPLE_FRONT}: key 'codec' is not in the format"],
+    ),
+    (
+        lambda m: m["tools"][0].update(version="1.0"),
+        ["tools/check_dataset.py: key 'version' is not in the format"],
+    ),
+    (
+        lambda m: m.pop("created"),
+        ["created is not a time in UTC, YYYY-MM-DDTHH:MM:SSZ"],
+    ),
 ]
 
 
@@ -2254,6 +2355,46 @@ def test_each_disagreement_with_metadata_yaml_is_one_mismatch(root, change, foun
     report = check(root)
     assert mismatches(report) == found
     assert not report["items"]["metadata"]["pass"]
+
+
+def test_finalize_writes_only_the_keys_the_check_defines(root):
+    metadata = read_meta(root)
+    assert sorted(metadata) == sorted(fmt.METADATA_KEYS)
+    assert sorted(metadata["counts"]) == sorted(fmt.COUNT_KEYS)
+    for row in metadata["object_types"].values():
+        assert sorted(row) == sorted(fmt.OBJECT_TYPE_KEYS)
+    assert {e["kind"] for e in metadata["files"]} == set(fmt.FILE_KINDS)
+    for listed in metadata["files"]:
+        assert sorted(listed) == sorted(fmt.FILE_ENTRY_KEYS[listed["kind"]])
+    for tool in metadata["tools"]:
+        assert sorted(tool) == sorted(fmt.TOOL_ENTRY_KEYS)
+
+
+@pytest.mark.parametrize(
+    ("created", "ok"),
+    [
+        ("2026-10-25T06:07:08Z", True),
+        ("2028-02-29T23:59:59Z", True),
+        ("2026-02-29T00:00:00Z", False),
+        ("2026-10-25T24:00:00Z", False),
+        ("2026-10-25T23:59:60Z", False),
+        ("2026-1-5T6:7:8Z", False),
+        ("2026-10-25T06:07:08", False),
+        ("2026-10-25T06:07:08+00:00", False),
+        ("2026-10-25 06:07:08Z", False),
+        ("٢٠٢٦-10-25T06:07:08Z", False),
+        # A YAML timestamp, not the string finalize writes.
+        (datetime(2026, 10, 25, 6, 7, 8, tzinfo=timezone.utc), False),
+        (None, False),
+    ],
+)
+def test_created_is_a_time_in_utc_to_the_second(root, created, ok):
+    metadata = read_meta(root)
+    metadata["created"] = created
+    write_meta(root, metadata)
+    assert mismatches(check(root, items=("metadata",))) == (
+        [] if ok else ["created is not a time in UTC, YYYY-MM-DDTHH:MM:SSZ"]
+    )
 
 
 def test_mismatches_come_in_one_order(root):
@@ -2912,6 +3053,18 @@ def test_a_frames_file_whose_read_fails_is_unavailable(root, monkeypatch):
     assert not proj["pass"]
 
 
+def test_running_out_of_memory_in_the_projection_stops_the_run(
+    root, capsys, monkeypatch
+):
+    # No finding on the frame or its file: the run cannot go on.
+    def exhausted(*args, **kwargs):
+        raise MemoryError
+
+    monkeypatch.setattr(fmt, "project_frame", exhausted)
+    message, _ = refused(capsys, root, "--seed", SEED)
+    assert message.startswith("the check ran out of memory while reading data/")
+
+
 # --- diversity ------------------------------------------------------------------------
 
 
@@ -2939,7 +3092,9 @@ def diversity(records, **criteria):
         "max_categories": 2,
         **criteria,
     }
-    ds = fmt.Dataset(Path("."), records, {}, {}, {}, [], {}, [], True)
+    # Each record is an episode of its own, clean unless it holds an error.
+    episodes = {rec.rel: fmt.Episode(rec) for rec in records}
+    ds = fmt.Dataset(Path("."), records, episodes, {}, {}, [], {}, [], True)
     return fmt.check_diversity(ds, values)
 
 
@@ -2952,6 +3107,11 @@ def test_diversity_counts_object_types_against_its_minimum():
         "n_frames": 3,
         "frame_fraction": 0.1,
     }
+    # A type whose only episode breaks a rule counts no more: scale leaves it out.
+    records[0].errors.append("a finding of the episode")
+    result = diversity(records, min_object_types=10)
+    assert (result["n_object_types"], result["n_object_types_read"]) == (9, 10)
+    assert not result["pass"]
 
 
 def test_diversity_finds_types_assets_and_episodes_that_are_one():
@@ -3134,6 +3294,21 @@ def test_diversity_reports_files_not_read(root):
     assert not result["pass"]
 
 
+def test_diversity_counts_the_types_of_episodes_whose_files_are_all_clean(root):
+    # banana's one episode has a damaged video, which scale leaves out; its frames file
+    # is still read, and its type is in the tables.
+    flip(root / "videos/wrist/banana/ep-2.mp4")
+    report = check(root)
+    result = report["items"]["diversity"]
+    assert (result["n_object_types"], result["n_object_types_read"]) == (2, 3)
+    assert list(result["object_types"]) == ["apple", "banana", "cherry"]
+    assert result["files_not_read"] == []
+    assert not result["pass"]
+    assert "  2 object types in clean episodes (3 in the files read), " in (
+        fmt.format_table(report)
+    )
+
+
 def test_diversity_walks_facts_of_any_depth():
     # Footers nest at most 32 levels, and nothing walks one by recursion either.
     facts = {k: {"x": 1} for k in fmt.FACT_KINDS}
@@ -3249,6 +3424,26 @@ def test_a_tool_that_is_not_listed_fails_the_run(root):
     report = check(root)
     assert report["published_tools"]["criteria"]["published_sha256"] is None
     assert not report["pass"]
+
+
+def test_the_run_says_whether_the_published_criteria_are_as_strict_as_the_test(
+    root, capsys
+):
+    # Published with criteria weaker than the test's, the dataset passes them, and the
+    # run says they are weaker without changing its verdict.
+    code, out, _, payload = main(capsys, root, "--seed", SEED)
+    assert (code, payload["pass"]) == (0, True)
+    assert payload["criteria"]["matches_published"] is True
+    assert payload["criteria"]["meets_test_definition"] is False
+    assert "; the published one: yes; at least as strict as the test: NO)" in out
+    assert payload["scale"]["criterion"] == {"min_frames": N_FRAMES}
+    # Published with the test's own values, which these ten frames do not meet.
+    republish(root, CRITERIA, criteria_text().encode())
+    code, out, _, payload = main(capsys, root, "--seed", SEED)
+    assert (code, payload["pass"]) == (1, False)
+    assert payload["criteria"]["meets_test_definition"] is True
+    assert "; the published one: yes; at least as strict as the test: yes)" in out
+    assert payload["scale"]["criterion"] == {"min_frames": 1_000_000}
 
 
 # --- the shipped script ---------------------------------------------------------------
