@@ -55,9 +55,11 @@ release notes.
 ## Review
 
 - Every pull request needs the required checks to pass (lint, tests on Python
-  3.10–3.14, dependency review, CodeQL) and one approving review from a maintainer
-  other than the author (see [GOVERNANCE.md](GOVERNANCE.md)). Branch protection on
-  `main` enforces both.
+  3.10–3.14, dependency review, the wheel build) and one approving review from a
+  maintainer other than the author (see [GOVERNANCE.md](GOVERNANCE.md)). Branch
+  protection on `main` enforces both. CodeQL also scans `main` and the pull requests
+  from this repository; it becomes a required check again once it runs on pull
+  requests from forks too (#94).
 - Reviews are requested automatically from the maintainers who look after the files
   a pull request changes, as listed in [`.github/CODEOWNERS`](.github/CODEOWNERS).
 - Maintainers aim to give a first response within **48 hours**.
