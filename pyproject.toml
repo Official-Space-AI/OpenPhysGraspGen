@@ -26,6 +26,9 @@ dataset = ["numpy>=1.26", "pyarrow>=23.0.1", "pyyaml>=6"]
 
 [project.urls]
 Homepage = "https://github.com/Official-Space-AI/OpenPhysGraspGen"
+Documentation = "https://github.com/Official-Space-AI/OpenPhysGraspGen/tree/main/docs"
+Source = "https://github.com/Official-Space-AI/OpenPhysGraspGen"
+Changelog = "https://github.com/Official-Space-AI/OpenPhysGraspGen/releases"
 Issues = "https://github.com/Official-Space-AI/OpenPhysGraspGen/issues"
 
 [project.scripts]
