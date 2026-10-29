@@ -51,6 +51,27 @@ pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
 openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 ```
 
+[공개 데이터셋 형식](docs/dataset/format.md)의 데이터셋으로 PG-T1 벤치마크를 채점합니다.
+`dataset` extra(`pip install "openphysgraspgen[dataset]"`)가 필요합니다.
+
+```bash
+openphysgraspgen benchmark pg-t1 path/to/dataset --json pg-t1.json
+```
+
+태스크마다 표를 출력하고, 보고서는 `pg-t1.json`에, 에피소드별 기록은 같은 폴더의
+`pg-t1.episodes.jsonl`에 저장합니다. 채점 규칙은
+[docs/benchmark/pg-t1.md](docs/benchmark/pg-t1.md)에 있습니다.
+
+데이터셋에 들어 있는 검사 스크립트로 데이터셋 시험의 네 항목(scale, metadata,
+consistency, diversity)을 검사합니다. `metadata.yaml`이 있는 데이터셋 루트에서 실행합니다.
+
+```bash
+python -I tools/check_dataset.py . --seed <the tester's seed>
+```
+
+Python 3.10 이상과 NumPy, PyArrow, PyYAML만 있으면 되고, 이 패키지는 필요 없습니다.
+옵션, 합격 기준, 보고서 내용은 [The check](docs/dataset/format.md#the-check)에 있습니다.
+
 구성방정식을 직접 계산하는 예시와 Newton 접촉 라벨 기록 예시는
 [영문 README](README.md#quick-start)에 있습니다.
 
@@ -69,7 +90,7 @@ openphysgraspgen --fracture-threshold 0.25 --confidence-threshold 0.5
 | 구분 | 위치 | 라이선스 |
 |---|---|---|
 | 라이브러리 (이 저장소) | GitHub | Apache-2.0 |
-| 파지 데이터셋 | Hugging Face Hub (`1.0.0rc1`부터) | CC-BY-4.0 |
+| 파지 데이터셋 | Hugging Face Hub (`1.0.0rc1`부터) | CC-BY-NC-4.0 |
 | 벤치마크와 재현 스크립트 | 이 저장소 (PG-T1은 `1.0.0rc1`, 나머지는 `1.0.0`) | Apache-2.0 |
 | 고정밀 솔버 코어 | 비공개 | 상용 |
 
@@ -81,11 +102,17 @@ PhysGraspGen의 일상 개발은 고객별 코드가 함께 있는 비공개 저
 공개적으로 계획하고 리뷰합니다. 모든 변경은 이슈에서 시작해 리뷰를 거친 pull
 request로 들어오고, 릴리스는 릴리스 노트와 SBOM을 붙여 배포합니다.
 
-## 의견 보내기
+## 커뮤니티와 지원
 
-버그 신고와 질문은 [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)에
-남겨 주세요. 한국어로 써도 됩니다. 기여 가이드, 행동 강령, 보안 정책은 추가하는 중입니다.
+- 질문·아이디어: [GitHub Discussions](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions)
+- 버그: [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)
+- 어디에 무엇을 물어야 하는지, 응답 시간: [COMMUNITY.md](COMMUNITY.md)
+- 보안 취약점: [SECURITY.md](SECURITY.md) (공개 이슈로 올리지 마세요)
+
+기여는 [CONTRIBUTING.md](CONTRIBUTING.md)부터 읽어 주세요. 참여하는 모든 사람은
+[행동 강령](CODE_OF_CONDUCT.md)을 따릅니다. 역할과 결정 방식, 릴리스 승인 절차는
+[GOVERNANCE.md](GOVERNANCE.md)에 있습니다. 질문과 이슈는 한국어로 써도 됩니다.
 
 ## 라이선스
 
-코드는 [Apache License 2.0](LICENSE), 데이터셋은 CC-BY-4.0으로 공개합니다.
+코드는 [Apache License 2.0](LICENSE), 데이터셋은 [CC-BY-NC-4.0](https://creativecommons.org/licenses/by-nc/4.0/)으로 공개합니다.

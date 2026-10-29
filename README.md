@@ -72,6 +72,29 @@ It prints a JSON summary with the calibrated and transferred parameters, the num
 of training and fracture samples, the estimate, and whether the confidence gate
 allowed it.
 
+Score the PG-T1 benchmark from a dataset in the [public format](docs/dataset/format.md),
+with the `dataset` extra installed (`pip install "openphysgraspgen[dataset]"`):
+
+```bash
+openphysgraspgen benchmark pg-t1 path/to/dataset --json pg-t1.json
+```
+
+It prints one table per task and writes the report to `pg-t1.json`, with one record
+per episode in `pg-t1.episodes.jsonl` beside it. The scoring rules are in
+[docs/benchmark/pg-t1.md](docs/benchmark/pg-t1.md).
+
+Check a dataset against the four items of the dataset test (scale, metadata,
+consistency, diversity) with the script it ships, from the dataset's root, the folder
+that holds `metadata.yaml`:
+
+```bash
+python -I tools/check_dataset.py . --seed <the tester's seed>
+```
+
+It needs only Python 3.10 or newer with NumPy, PyArrow and PyYAML, and nothing from
+this package. The options, the acceptance values and the report are under
+[The check](docs/dataset/format.md#the-check).
+
 Evaluate a constitutive law directly:
 
 ```python
@@ -117,7 +140,7 @@ PhysGraspGen is developed as open core.
 | Part | Where | License |
 |---|---|---|
 | Library (this repository) | GitHub | Apache-2.0 |
-| Grasp dataset | Hugging Face Hub (with `1.0.0rc1`) | CC-BY-4.0 |
+| Grasp dataset | Hugging Face Hub (with `1.0.0rc1`) | CC-BY-NC-4.0 |
 | Benchmarks and reproduction scripts | This repository (PG-T1 with `1.0.0rc1`, the rest with `1.0.0`) | Apache-2.0 |
 | High-precision solver core | Not published | Commercial |
 
@@ -130,13 +153,19 @@ the project's. From now on, work on the open library is planned and reviewed her
 in public: every change starts as an issue and lands through a reviewed pull
 request, and releases ship with release notes and an SBOM.
 
-## Feedback
+## Community and support
 
-Bug reports and questions are welcome as
-[GitHub issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues).
-Contribution guidelines, a code of conduct and a security policy are being added.
+- Questions and ideas: [GitHub Discussions](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions)
+- Bugs: [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)
+- Where to ask what, and response times: [COMMUNITY.md](COMMUNITY.md)
+- Security vulnerabilities: [SECURITY.md](SECURITY.md) (please do not open a public issue)
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[`good first issue`](https://github.com/Official-Space-AI/OpenPhysGraspGen/labels/good%20first%20issue)
+label. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Who
+decides what, and how releases are approved, is in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## License
 
 Code is released under the [Apache License 2.0](LICENSE). The dataset is released
-under CC-BY-4.0.
+under [CC-BY-NC-4.0](https://creativecommons.org/licenses/by-nc/4.0/).

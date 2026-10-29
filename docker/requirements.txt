@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The exact versions of the third-party packages that the container image installs with
+# the wheel and its dataset extra. The Dockerfile hands this file to pip as constraints,
+# with wheels only, so every image built from a commit holds these versions and no others.
+# Dependabot proposes updates; each one changes the image and is reviewed in a pull request.
+numpy==2.5.4
+pyarrow==26.0.0
+pyyaml==6.0.3

@@ -1,7 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import argparse
 import json
+import sys
+from collections.abc import Sequence
+from importlib.metadata import version as _package_version
 
 import numpy as np
 
@@ -92,11 +97,27 @@ def run_pipeline(
     }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
+def main(argv: Sequence[str] | None = None) -> None:
+    """The openphysgraspgen command: the reference pipeline, or ``benchmark``."""
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["benchmark"]:
+        from .benchmark.cli import main as benchmark
+
+        raise SystemExit(benchmark(argv[1:]))
+    parser = argparse.ArgumentParser(
+        prog="openphysgraspgen",
+        description="Run the reference pipeline on a small synthetic problem.",
+        epilog="openphysgraspgen benchmark pg-t1 DATASET scores PG-T1 from a dataset "
+        "(see openphysgraspgen benchmark pg-t1 --help).",
+    )
     parser.add_argument("--fracture-threshold", type=float, default=0.25)
     parser.add_argument("--confidence-threshold", type=float, default=0.5)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_package_version('openphysgraspgen')}",
+    )
+    args = parser.parse_args(argv)
     print(
         json.dumps(
             run_pipeline(args.fracture_threshold, args.confidence_threshold),

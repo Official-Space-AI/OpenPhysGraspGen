@@ -1,0 +1,43 @@
+# Reviewers requested for each area, from the maintainers table in GOVERNANCE.md.
+# Branch protection still asks for one approving review from any maintainer other
+# than the author; code owners are requested, not required. The last matching
+# pattern wins, so the general rule comes first. A code owner needs write access to
+# the repository, so a maintainer is added here once they have it.
+
+# Every file: the project lead and the maintainer for repository operations.
+*                                       @oollccddss @kms8720
+
+# Code review: the code and its tests.
+/src/                                   @oollccddss @songgyujeong @wissingj
+/tests/                                 @oollccddss @songgyujeong @wissingj
+
+# Repository operations, CI and community.
+/.github/                               @kms8720
+/CONTRIBUTING.md                        @kms8720
+/COMMUNITY.md                           @kms8720
+/docs/oss/                              @kms8720
+/docs/metrics/                          @kms8720
+/scripts/                               @kms8720
+
+# Releases, packaging, SBOM and the container image.
+/pyproject.toml                         @oollccddss
+/RELEASING.md                           @oollccddss
+/Dockerfile                             @oollccddss
+/.dockerignore                          @oollccddss
+/docker/                                @oollccddss
+/.github/workflows/release.yml          @oollccddss
+/.github/workflows/image.yml            @oollccddss
+/.github/scripts/                       @oollccddss
+
+# The dataset.
+/src/openphysgraspgen/dataset/          @oollccddss @songgyujeong @wissingj
+/docs/dataset/                          @oollccddss
+
+# Governance, licensing and security.
+/GOVERNANCE.md                          @oollccddss @kms8720
+/LICENSE                                @oollccddss @kms8720
+/LICENSES/                              @oollccddss @kms8720
+/NOTICE                                 @oollccddss @kms8720
+/REUSE.toml                             @oollccddss @kms8720
+/SECURITY.md                            @oollccddss @kms8720
+/.github/CODEOWNERS                     @oollccddss @kms8720

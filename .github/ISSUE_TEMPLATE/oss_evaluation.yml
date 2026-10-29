@@ -1,0 +1,42 @@
+name: OSS evaluation
+description: Evaluate a new third-party dependency, or approve publishing code, data or models.
+title: "[OSS Evaluation]: "
+labels: ["oss-evaluation"]
+body:
+  - type: dropdown
+    id: gate
+    attributes:
+      label: Gate
+      options: ["Adopt third-party OSS", "Publish our OSS"]
+    validations: {required: true}
+  - type: input
+    id: target
+    attributes:
+      label: Target and exact version or commit
+    validations: {required: true}
+  - type: input
+    id: source
+    attributes:
+      label: Official URL
+    validations: {required: true}
+  - type: textarea
+    id: scenario
+    attributes:
+      label: How it is used, combined, distributed or published
+    validations: {required: true}
+  - type: textarea
+    id: checks
+    attributes:
+      label: Checks
+      description: License and NOTICE, security record, maintenance activity, alternatives; for publishing, ownership and absence of secrets, personal or customer data.
+    validations: {required: true}
+  - type: dropdown
+    id: decision
+    attributes:
+      label: Proposed decision
+      options: ["Approve", "Approve with conditions", "Preview / PoC only", "Reject or postpone"]
+    validations: {required: true}
+  - type: textarea
+    id: conditions
+    attributes:
+      label: Conditions, owner, deadline, re-evaluation trigger

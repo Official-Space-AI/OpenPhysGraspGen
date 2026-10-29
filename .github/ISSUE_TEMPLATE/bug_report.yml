@@ -1,0 +1,43 @@
+name: Bug report
+description: Something does not work as documented.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations: {required: true}
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: A short script or command that shows the problem.
+      render: python
+    validations: {required: true}
+  - type: input
+    id: version
+    attributes:
+      label: openphysgraspgen version or commit
+      placeholder: "1.0.0rc1 or a commit SHA"
+    validations: {required: true}
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Python 3.11, Ubuntu 24.04, newton 1.x (if using sensors)"
+    validations: {required: true}
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: This report contains no credentials, personal data or unpublished vulnerabilities.
+          required: true

@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # Actions in .github/workflows are pinned to commit SHAs; Dependabot updates the SHA
+  # and the release tag in the comment together.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Python dependencies declared in pyproject.toml.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # The exact versions the container image installs (docker/requirements.txt).
+  - package-ecosystem: "pip"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+
+  # The base image in the Dockerfile's FROM line, pinned by digest. Dependabot proposes
+  # the current digest of the same tag. BASE_IMAGE must change in the same pull request,
+  # which check_image.sh enforces, and RELEASING.md lists the re-check of the policy.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # A new Python minor version changes the image's paths and notice; it is moved by hand.
+      - dependency-name: "*python*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
