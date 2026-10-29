@@ -150,6 +150,46 @@ def test_an_answer_after_7_days_still_counts_as_waiting(api):
     assert row["items_without_response_7d"] == 2
 
 
+def test_a_listed_maintainer_seen_as_contributor_is_not_outside(api):
+    # The workflow's token sees a maintainer with a private membership as CONTRIBUTOR.
+    api[f"/repos/{REPO}/issues?state=all"].append(
+        item(7, "teammate", "2026-10-11T00:00:00Z", "CONTRIBUTOR", pr=True)
+    )
+    end = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    unlisted = metrics.collect(fake(api), REPO, "2026-10", now=end)
+    assert unlisted["outside_items_opened"] == 3
+    assert unlisted["outside_pr_authors"] == 2
+    listed = metrics.collect(
+        fake(api), REPO, "2026-10", now=end, maintainers=frozenset({"teammate"})
+    )
+    assert listed["outside_items_opened"] == 2
+    assert listed["outside_pr_authors"] == 1
+    assert listed["items_without_response_7d"] == 1
+
+
+def test_the_maintainers_are_read_from_the_governance_table(tmp_path):
+    path = tmp_path / "GOVERNANCE.md"
+    path.write_text(
+        "# Governance\n\n"
+        "Write to [@someone](https://github.com/someone) for anything else.\n\n"
+        "### Current maintainers\n\n"
+        "| Name | GitHub | Area |\n"
+        "|---|---|---|\n"
+        "| Lead | [@lead](https://github.com/lead) | Releases |\n"
+        "| Helper | [@help-er2](https://github.com/help-er2) | Review |\n\n"
+        "The project lead is [@lead](https://github.com/lead).\n\n"
+        "## Decisions\n\n"
+        "| Who | [@other](https://github.com/other) |\n",
+        encoding="utf-8",
+    )
+    assert metrics.maintainer_logins(path) == {"lead", "help-er2"}
+
+
+def test_the_repository_governance_names_its_maintainers():
+    logins = metrics.maintainer_logins(metrics.GOVERNANCE)
+    assert {"oollccddss", "kms8720"} <= logins
+
+
 def test_a_row_replaces_the_same_month(tmp_path):
     path = tmp_path / "kpi.csv"
     empty = dict.fromkeys(metrics.FIELDS, 0)

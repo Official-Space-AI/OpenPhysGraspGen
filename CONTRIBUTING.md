@@ -60,6 +60,8 @@ release notes.
   protection on `main` enforces both. CodeQL also scans `main` and the pull requests
   from this repository; it becomes a required check again once it runs on pull
   requests from forks too (#94).
+- Reviews are requested automatically from the maintainers who look after the files
+  a pull request changes, as listed in [`.github/CODEOWNERS`](.github/CODEOWNERS).
 - Maintainers aim to give a first response within **48 hours**.
   This is a goal, not a guarantee.
 - Reviewers focus on correctness, tests, physical units and numerical edge cases,
