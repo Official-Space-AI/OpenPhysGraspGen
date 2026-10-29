@@ -49,5 +49,7 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 ## Health metrics
 
 Maintainers review these monthly and publish a short summary in Announcements:
-time to first response, open issues without triage, new and returning
-contributors, issues and pull requests opened and closed, and releases.
+time to first response, items left without a response, new and returning
+contributors, issues and pull requests opened and closed, open good first issues,
+and releases with SBOMs. [docs/metrics/definitions.md](docs/metrics/definitions.md)
+defines each one and how it is collected.
