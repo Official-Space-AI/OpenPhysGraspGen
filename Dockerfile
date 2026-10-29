@@ -43,8 +43,11 @@ RUN printf '%s\n' \
     "" \
     "- The Debian packages of the base image, many of them GPL or LGPL. ca-certificates" \
     "  holds the Mozilla CA list under the MPL-2.0, and libdb5.3t64 is Berkeley DB under" \
-    "  the Sleepycat license. Their source is available from Debian at those versions" \
-    "  (https://snapshot.debian.org, https://sources.debian.org)." \
+    "  the Sleepycat license. Their source is in Debian's archive at those versions:" \
+    "  each source package at https://snapshot.debian.org/package/<source>/<version>/." \
+    "  The release's image SBOM lists the binary packages, and the section Answering a" \
+    "  source request of RELEASING.md in https://github.com/Official-Space-AI/OpenPhysGraspGen" \
+    "  shows how to list the source package and version of each." \
     "- certifi, which pip vendors: the same Mozilla CA list under the MPL-2.0, in source" \
     "  form in the image." \
     "- Python ${PYTHON_VERSION} (CPython), whose modules link Berkeley DB, GNU dbm and GNU" \
@@ -55,6 +58,10 @@ RUN printf '%s\n' \
     "- The GCC runtime libraries that the NumPy wheel bundles in numpy.libs: libgfortran," \
     "  GPL-3.0-or-later with the GCC Runtime Library Exception 3.1, and libquadmath," \
     "  LGPL-2.1-or-later. Their source is part of GCC (https://gcc.gnu.org)." \
+    "" \
+    "Source archive: the GitHub release of this image's version attaches the source of all" \
+    "of these components as openphysgraspgen-image-<version>-sources.tar, at" \
+    "https://github.com/Official-Space-AI/OpenPhysGraspGen/releases." \
     "" \
     "Written offer: for at least three years after we last distribute this image, SpaceAI" \
     "(주식회사 스페이스에이아이) will give anyone who asks a complete machine-readable copy" \

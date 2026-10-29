@@ -16,7 +16,7 @@ Releases are cut by pushing a version tag. The `Release` workflow
    `.github/scripts/complete_image_sbom.py` (the licenses Syft cannot read and the libraries
    bundled in the NumPy wheel), records every known vulnerability in a Grype report, and
    fails if a package has no license or if a known vulnerability of severity high or above
-   has a fix,
+   has a fix and is not one of the assessed exceptions in `docker/grype.yaml`,
 6. only then publishes the sdist and wheel to PyPI as `openphysgraspgen`,
 7. attests the build provenance and the SBOM, and creates a GitHub release with the sdist,
    wheel, the three SBOMs, `SHA256SUMS` and the image's Grype report attached. Tags ending in
@@ -41,9 +41,15 @@ because that is the import name of the project's internal solver package (#28).
    git push origin v1.0.0rc1
    ```
 
-3. Approve the `pypi` environment deployment when the run asks for it, which it does only
-   after the build and the image have passed every check. Then check that the release page
-   has the seven assets and that the image is in the registry.
+3. Before approving the `pypi` environment deployment, open this run's `image-scan` artifact
+   and check that every finding of severity high or above without a fix is assessed, as in
+   step 2: the run scans with a newer vulnerability database than the `main` run did. The run
+   asks for the approval only after the build and the image have passed every check. Then
+   check that the release page has the seven assets and that the image is in the registry.
+4. Attach the image's source to the release as `openphysgraspgen-image-<version>-sources.tar`,
+   built as described under "Answering a source request", with a `SHA256SUMS` inside it.
+   `NOTICE.container` in the image points there. Until #73 adds this to the release
+   workflow, a maintainer builds and attaches it by hand.
 
 ## When a release run fails
 
@@ -153,22 +159,43 @@ the digest is old, update the digest:
 ## Findings without a fix
 
 The image's vulnerability gate fails only on a vulnerability of severity high or above that
-has a fix. Findings without a fix are mostly in the base image's Debian packages. Assess
-each one of severity high or above before the first release that ships it, in the base
-image's evaluation issue or in an issue labelled `re-evaluation`:
+has a fix. Findings without a fix are mostly in the base image's Debian packages. Decide
+the action on each within a day of finding it for severity critical, a week for high, a
+month for medium and three months below. Assess each one of severity high or above also
+before the first release that ships it, in the base image's evaluation issue or in an
+issue labelled `re-evaluation`:
 
 - When the image does not contain or never runs the vulnerable code, record it as not
   affected, with the reason: for example a command that the image never runs, a function
   that no file in the image calls, or an installed version outside the affected range.
 - Otherwise accept it only until a stated date, no later than the next quarterly
-  re-evaluation, and assess it again by then.
+  re-evaluation, and assess it again by then. The project lead approves the acceptance
+  in the issue, or SpaceAI's CEO when the project lead proposed it.
 
-The quarterly `re-evaluation` issue reviews the other findings without a fix. Each release
-attaches the full Grype report. The libraries in `numpy.libs` are listed in the image SBOM
-under their file names and without a version on purpose. Their files carry no version, and
-Grype would match a package without a version to every advisory for its name, so it matches
-none to them; their advisories (OpenBLAS, libgfortran, libquadmath) are checked by hand in
-the quarterly issue, for the NumPy version in `docker/requirements.txt`.
+Record the decisions on the lower findings in an issue labelled `re-evaluation`; the
+quarterly one reviews all findings without a fix again. Each release attaches the full
+Grype report.
+
+Some findings count as fixed although no digest of `python:3.12-slim-trixie` clears them:
+Grype matches CPython by CPE against NVD ranges that often have no 3.12 bound, and the pip
+that comes with the base image is fixed only in a later pip. When one of severity high or
+above stops the gate, assess it as above in an issue labelled `re-evaluation`, and then add
+an entry to `docker/grype.yaml` in a reviewed pull request: the vulnerability, the package
+name and its exact version, and a reason that links the issue. Only the gate reads that
+file, so the report still lists the finding, and an entry stops matching when a new digest
+changes the version. A release whose gate stopped is then cut again as described under
+"When a release run fails".
+
+Two kinds of bundled libraries are out of reach of the automated matching, and their
+advisories are checked by hand in the quarterly issue and in the review of every pull
+request that changes NumPy or PyArrow in `docker/requirements.txt`:
+
+- The libraries in `numpy.libs` (OpenBLAS, libgfortran, libquadmath) are listed in the image
+  SBOM under their file names and without a version on purpose. Their files carry no
+  version, and Grype would match a package without a version to every advisory for its
+  name, so it matches none to them.
+- The zlib that the PyArrow wheel links into its own libraries is in no SBOM. PyArrow
+  26.0.0 carries zlib 1.3.2, which #72 assessed as not affected by CVE-2026-85091.
 
 ## Answering a source request
 
@@ -177,31 +204,49 @@ we last distribute an image, SpaceAI gives anyone who asks a complete machine-re
 of the corresponding source of its components under the GPL, the LGPL, the MPL-2.0 or
 another license that requires source availability. Requests come to oss.spaceai@gmail.com.
 The maintainers answer within 30 days and charge nothing beyond the cost of physically
-performing the distribution; a download link costs nothing.
+performing the distribution; a download link costs nothing. From 1.0.0rc1 on, each release
+also attaches the image's source as `openphysgraspgen-image-<version>-sources.tar`, so a
+link to it answers most requests.
 
 To produce the source for an image, by tag or digest:
 
-1. List the Debian source packages and their versions in the image. The image SBOM on the
-   release lists the binary packages; this gives the sources they were built from:
+1. List the Debian source packages and their versions in the image, with the sources that
+   the `Built-Using` and `Static-Built-Using` fields name: those are compiled into a binary
+   package, such as rustc and the Rust crates in `sqv`. The image SBOM on the release lists
+   the binary packages; this gives the sources, which differ between architectures:
 
    ```sh
-   docker run --rm --entrypoint dpkg-query ghcr.io/official-space-ai/openphysgraspgen:1.0.0rc1 \
-     -W -f '${source:Package} ${source:Version}\n' | sort -u
+   image=ghcr.io/official-space-ai/openphysgraspgen:1.0.0rc1
+   query() { docker run --rm --platform linux/amd64 --entrypoint dpkg-query "$image" -W -f "$1"; }
+   {
+     query '${source:Package} ${source:Version}\n'
+     query '${Built-Using},${Static-Built-Using},\n' |
+       tr ',' '\n' | sed -n 's/^ *\([^ ]*\) (= \(.*\))$/\1 \2/p'
+   } | sort -u
    ```
 
 2. Download each source package at that version, with `apt-get source <package>=<version>`
    from deb.debian.org (`deb-src` entries for trixie, trixie-updates and trixie-security)
    while the version is current there, and otherwise from snapshot.debian.org
-   (`https://snapshot.debian.org/package/<package>/<version>/`).
+   (`https://snapshot.debian.org/package/<package>/<version>/`). Check each one's files
+   against its `.dsc` with `dscverify --no-sig-check`.
 3. Add `Python-<version>.tar.xz` from python.org, with the version `NOTICE.container` names,
-   and the docker-library Dockerfile at the commit it links.
-4. For libgfortran and libquadmath in `numpy.libs`, add the source of the GCC release they
-   were built from (https://gcc.gnu.org). NumPy's wheels take them from their manylinux
-   build image; that NumPy version's wheel build names the image and its GCC.
+   checked against `PYTHON_SHA256` in the docker-library Dockerfile at the commit it links,
+   and that Dockerfile.
+4. For libgfortran and libquadmath in `numpy.libs`, add the source of the GCC build they
+   come from. NumPy's wheels take them from their manylinux build image, and each file
+   names its build in its debug link: `strings` shows
+   `libgfortran.so.5.0.0-8.5.0-28.el8_10.alma.1.x86_64.debug` for NumPy 2.5.4, that is
+   AlmaLinux 8.10's gcc 8.5.0-28, whose source RPM is in AlmaLinux's vault
+   (https://vault.almalinux.org/).
 5. Send the files or a link to them, and keep the request and the answer.
 
-Publishing these sources next to each image, so that the written offer is only a backup,
-is planned in #73.
+For the components under GPL-3.0 or LGPL-3.0, such as bash and coreutils, a download is
+conveyed under GPLv3 section 6(d): the source may be on another server when clear
+directions next to the image say where it is, and we stay responsible for it being
+available. `NOTICE.container` points to the sources archive on the release and to Debian's
+snapshot archive, and the written offer covers the rest. #73 builds the archive in the
+release workflow and checks on pull requests that every source in the image can be found.
 
 ## One-time setup
 
@@ -211,5 +256,6 @@ is planned in #73.
   publishing settings.
 - The repository has an environment `pypi` that only `v*` tags can deploy to, with a required
   reviewer, so every upload waits for a maintainer's approval.
-- After the first image is pushed, make the `openphysgraspgen` container package public in the
-  organization's package settings and link it to this repository.
+- After the first image is pushed and its sources archive is on the release, make the
+  `openphysgraspgen` container package public in the organization's package settings and
+  link it to this repository. A public package cannot be made private again.

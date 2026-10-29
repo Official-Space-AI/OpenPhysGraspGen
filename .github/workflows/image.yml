@@ -109,7 +109,9 @@ jobs:
           output-file: ${{ env.NAME }}.grype.json
       # Fails on a known vulnerability of severity high or above that has a fix, which means
       # the pinned base image is out of date (see RELEASING.md). Findings without a fix
-      # pass here and are listed in the report above.
+      # pass here and are listed in the report above. docker/grype.yaml holds the assessed
+      # findings that count as fixed but that no digest of the base image clears; only this
+      # step reads it, and naming it turns off the search for a .grype.yaml.
       - name: Scan the image SBOM for fixable vulnerabilities
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2 (Grype v0.118.0)
         with:
@@ -117,6 +119,7 @@ jobs:
           fail-build: true
           severity-cutoff: high
           only-fixed: true
+          config: docker/grype.yaml
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-sbom
