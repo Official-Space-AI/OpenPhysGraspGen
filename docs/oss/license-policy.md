@@ -8,28 +8,51 @@ and each [OSS evaluation](evaluation.md) applies the rest. The classes are about
 we take in. The licenses of what we publish ourselves are under
 [What we publish](#what-we-publish).
 
-The policy takes effect when it is merged. It changes only through a pull request
-that the project lead approves, so the history of this file is the history of the
-policy.
+These are the license rules of SpaceAI's open source policy, in effect since
+23 October 2026, as they apply to this repository, its releases and the public
+dataset; the rule for container base images applies from 25 October 2026. The
+classes below and the allow list in the dependency review config change through a
+pull request that the project lead approves, or that SpaceAI's CEO approves when the
+project lead proposed it. Any other rule here changes only with the company policy,
+which SpaceAI's CEO approves.
 
 ## License classes
 
-| Class | Licenses | Rule |
+| Class | Licenses (SPDX) | Rule |
 |---|---|---|
-| Allowed | 0BSD, Apache-2.0, BSD-2-Clause, BSD-3-Clause, CC0-1.0, ISC, MIT, MIT-CMU, PSF-2.0, Python-2.0, Unlicense, Zlib | The dependency review check passes them (`allow-licenses`). Keep their license and copyright notices |
-| Conditional | LGPL-2.1, LGPL-3.0, MPL-2.0, EPL-2.0 | LGPL code is used unmodified and dynamically linked; MPL and EPL files keep their license when modified. Needs an approved evaluation, after which the package's purl is listed under `allow-dependencies-licenses` with the approval date |
-| Review required | GPL-2.0, GPL-3.0, AGPL-3.0 and other strong copyleft licenses | Never a runtime dependency of the package, and never bundled into its sdist or wheel. A tool used only in CI or development, or an external program the user installs, can be approved by an evaluation that explains why nothing we distribute is affected |
-| Prohibited | No license; non-commercial or no-derivatives terms (such as CC-BY-NC, CC-BY-ND); source-available terms (such as SSPL, BUSL, the Elastic License) | Not used |
-| Case by case | Model licenses (such as OpenRAIL and the Llama licenses) and dataset licenses | Evaluated for their use, output and redistribution terms before use |
+| Allowed | MIT, MIT-CMU, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC, Zlib, PSF-2.0, Python-2.0, CC0-1.0, Unlicense, and CC-BY-4.0 for data and assets | Used once its evaluation is confirmed, as [evaluation.md](evaluation.md) describes. Keep their notices |
+| Conditional | MPL-2.0, EPL-2.0, LGPL-2.1, LGPL-3.0, CC-BY-SA-4.0, model licenses (such as OpenRAIL and the Llama licenses), vendor terms (such as the NVIDIA software license and LicenseRef-TOST-1.0) | The evaluation states how the component is combined and distributed, and the project lead approves it |
+| Review required | GPL-2.0, GPL-3.0, AGPL-3.0 | Not included in or linked from the repository or anything we distribute. A development tool that stays out of everything we distribute may be used with the project lead's approval. Container base images follow the rule below |
+| Prohibited | SSPL-1.0, non-commercial terms (such as CC-BY-NC), no-derivatives terms when we would modify the work (such as CC-BY-ND), no license, terms that forbid modification or redistribution | Not used |
+
+The dependency review check passes the allowed class except CC-BY-4.0, which is for
+data and assets (`allow-licenses`). A package under a conditional license passes once
+its evaluation is approved and its purl is listed under `allow-dependencies-licenses`
+with the approval date. LGPL code is used unmodified and dynamically linked, and MPL
+and EPL files keep their license when modified.
 
 A component under several licenses at once (`AND`) must meet the rule of each. With a
 choice (`OR`), we use an allowed one and record which in its evaluation.
 
-A container image we publish also redistributes its base image's packages and the
-wheels installed in it, some of them under the GPL or the LGPL (such as the GCC
-runtime libraries inside NumPy's wheels). The base image is evaluated as one
-component, is used unmodified and pinned by digest, and every image ships an SBOM
-listing these components and a notice that says where their source is.
+The OS packages and system libraries in a container image's base image (an official
+image of an operating system and a language runtime) are programs separate from our
+work. They may be shipped in our image even under a review-required or conditional
+license when all of the following hold; a package under a prohibited license is never
+shipped.
+
+1. The official image is used unmodified and pinned by digest.
+2. Our code only runs those packages as separate programs or uses them as the
+   system's libraries, and never modifies them.
+3. The release's image SBOM lists every package in the image with its license.
+4. The image's notice names the base image and its digest and says where the sources
+   of the packages are, and we provide the source of that version to anyone who asks,
+   for at least three years after the image was last distributed.
+5. These conditions are checked again, and recorded in an evaluation, whenever the
+   base image changes or is updated.
+
+Conditions 2 to 5 also apply to runtime libraries that a dependency installed in the
+image bundles in its binaries, such as the GCC runtime libraries inside NumPy's
+wheels.
 
 Components outside the allowed class that have been approved are listed in the
 [inventory](inventory.md) with their evaluation.

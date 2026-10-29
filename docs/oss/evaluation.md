@@ -12,6 +12,9 @@ The form's fields follow these steps.
    dataset or model; *Publish our OSS* for code, data or a model leaving the private
    repository.
 2. **Target.** The exact version, version range or commit, and the official URL.
+   Tools, actions and the container image pin an exact version or commit; the
+   package's own dependencies take a range, since a library cannot pin what its users
+   install.
 3. **Use.** How the component is used, combined, distributed or published: a runtime
    dependency, an optional extra, a build or CI tool, an external program the user
    installs, something shipped in a container image.
@@ -20,9 +23,11 @@ The form's fields follow these steps.
    - the license is identified and its class in the [license policy](license-policy.md)
      allows this use;
    - no unresolved critical vulnerability affects the accepted versions;
-   - there is no code, binary or data of unknown origin.
+   - there is no code, binary or data of unknown origin;
+   - it supports every platform the project needs.
 5. **Facts.** License, release and commit activity, known advisories in the accepted
-   versions, with the date they were checked.
+   versions, with the date they were checked. For a model or a dataset, also its use
+   restrictions, the rights in its outputs and the attribution it requires.
 6. **Score**, out of 100:
 
    | Area | Points |
@@ -35,17 +40,21 @@ The form's fields follow these steps.
    | Community and governance | 10 |
    | Sustainability and replaceability | 10 |
 
-   The score makes evaluations comparable. The decision rests on the blocking
-   conditions and on the conditions attached to it.
+   The score makes evaluations comparable. Below 70 a component is not adopted; from
+   70 up, the decision rests on the blocking conditions and on the conditions
+   attached to it.
 7. **Alternatives.** At least one alternative, or why there is none.
 8. **Decision.** *Approve*, *Approve with conditions*, *Preview / PoC only*, or *Reject
    or postpone*, with each condition's owner and deadline and what triggers a
    re-evaluation.
 
-The project lead approves the decision with a comment in the issue. The component is
-then listed in the [inventory](inventory.md) with a link to the issue. A condition
-that needs a code change gets its own issue and pull request, which link back to the
-evaluation.
+When the license is in the allowed class, the maintainer for repository operations
+listed in [GOVERNANCE.md](../../GOVERNANCE.md) confirms the decision with a comment in
+the issue, or the project lead when that maintainer is away. In any other class the
+project lead approves it, and SpaceAI's CEO approves an evaluation that the project
+lead proposed. The component is then listed in the [inventory](inventory.md) with a
+link to the issue. A condition that needs a code change gets its own issue and pull
+request, which link back to the evaluation.
 
 ## Re-evaluation
 

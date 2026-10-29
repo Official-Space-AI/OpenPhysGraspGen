@@ -1,6 +1,7 @@
 # Pull request rules taken from the license classes in docs/oss/license-policy.md
 # and the vulnerability rules in docs/oss/vulnerability-log.md. Change this file
-# by pull request; the project lead approves the change.
+# by pull request; the project lead approves the change, or SpaceAI's CEO when the
+# project lead proposed it.
 
 license-check: true
 vulnerability-check: true
