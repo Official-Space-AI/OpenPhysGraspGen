@@ -69,7 +69,7 @@ each action to a commit SHA. All are covered by [#51][51] (approved 2026-10-27).
 | anchore/scan-action (Grype) | v7.4.2 (Grype v0.118.0) | MIT | Vulnerability scan of the release SBOM |
 | actions/attest | v4.2.2 | MIT | Build provenance attestations |
 | pypa/gh-action-pypi-publish | v1.14.3 | BSD-3-Clause | Trusted publishing to PyPI |
-| CodeQL (default setup) | managed by GitHub | MIT (action), GitHub CodeQL terms (CLI) | Code scanning, on this public repository only |
+| github/codeql-action (CodeQL) | v4.39.1 | MIT (action), GitHub CodeQL terms (CLI) | Code scanning of Python and the workflows, on this public repository only |
 
 [45]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/45
 [46]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/46
