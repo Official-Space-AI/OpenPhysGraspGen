@@ -85,6 +85,18 @@ It prints one table per task and writes the report to `pg-t1.json`, with one rec
 per episode in `pg-t1.episodes.jsonl` beside it. The scoring rules are in
 [docs/benchmark/pg-t1.md](docs/benchmark/pg-t1.md).
 
+Check a dataset against the four items of the dataset test (scale, metadata,
+consistency, diversity) with the script it ships, from the dataset's root, the folder
+that holds `metadata.yaml`:
+
+```bash
+python -I tools/check_dataset.py . --seed <the tester's seed>
+```
+
+It needs only Python 3.10 or newer with NumPy, PyArrow and PyYAML, and nothing from
+this package. The options, the acceptance values and the report are under
+[The check](docs/dataset/format.md#the-check).
+
 Evaluate a constitutive law directly:
 
 ```python
