@@ -1,10 +1,29 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
 # SPDX-License-Identifier: Apache-2.0
+import importlib.metadata
 import math
 
 import pytest
 
+import openphysgraspgen
 from openphysgraspgen import run_pipeline
+from openphysgraspgen.pipeline import main
+
+
+def test_version_matches_the_installed_metadata():
+    assert openphysgraspgen.__version__ == importlib.metadata.version(
+        "openphysgraspgen"
+    )
+
+
+def test_version_flag_prints_the_version(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--version"])
+    assert exit_info.value.code == 0
+    assert (
+        capsys.readouterr().out.strip()
+        == f"openphysgraspgen {openphysgraspgen.__version__}"
+    )
 
 
 def test_reference_pipeline_runs_end_to_end():

@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from importlib.metadata import version as _package_version
 
 import numpy as np
 
@@ -111,6 +112,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--fracture-threshold", type=float, default=0.25)
     parser.add_argument("--confidence-threshold", type=float, default=0.5)
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_package_version('openphysgraspgen')}",
+    )
     args = parser.parse_args(argv)
     print(
         json.dumps(

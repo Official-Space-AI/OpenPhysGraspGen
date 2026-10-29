@@ -1,5 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
 # SPDX-License-Identifier: Apache-2.0
+import importlib.metadata
+
+__version__ = importlib.metadata.version("openphysgraspgen")
+
 from .constitutive import (
     LABEL_LAWS,
     MooneyRivlinParams,
@@ -49,6 +53,7 @@ __all__ = [
     "StateEstimate",
     "TrainingSample",
     "YeohParams",
+    "__version__",
     "build_training_data",
     "calibrate_material",
     "cauchy_stress",
