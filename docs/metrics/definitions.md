@@ -19,7 +19,11 @@ A second run for the same month replaces its row.
 ## Columns
 
 Bots (Dependabot and other app accounts) are left out of every count. "Outside" means
-an author who is not an owner, member or collaborator of the repository.
+an author who is neither listed in the maintainers table of
+[GOVERNANCE.md](../../GOVERNANCE.md#current-maintainers) nor reported by GitHub as an
+owner, member or collaborator of the repository. The table counts because GitHub reports
+membership only to a token that can see it, and the workflow's token cannot see a
+private organization membership.
 
 | Column | Definition | Why |
 |---|---|---|
