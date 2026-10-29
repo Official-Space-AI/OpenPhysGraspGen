@@ -381,18 +381,22 @@ files, are ignored and listed in the report.
 |---|---|---|
 | scale | no data file breaks a rule, and the frames of the episodes whose files are all clean reach the minimum | `min_frames` 1,000,000 |
 | metadata | nothing `metadata.yaml` states disagrees with the files: counts, object types, channels, conventions, each episode's shared values, each file's kind, size, count, identity and sha256, the tools and `SHA256SUMS`; it holds no key the format does not define, and `created` is a time in UTC. And the specification holds: the required channels and cameras in every episode, the licence, a DOI and an `https://` download URL | `max_mismatches` 0; the six channels, `front` and `wrist`, `CC-BY-NC-4.0` |
-| consistency | every frame's layers carry the frame's own step and its videos hold it at its index (the step part), and on a sample drawn with the seed from the frames whose contacts press on the robot, those contact points projected through each camera land within a tolerance of the object's mask (the projection) | `min_pass_fraction` 1.0 for both parts, of the layers `rgb`, `depth`, `force`, `stress`; a sample of 1,000 from at least 1,000 such frames; 4 px |
+| consistency | every frame's layers carry the frame's own step and its videos hold it at its index (the step part), and on a sample drawn with the seed from the frames whose contacts press on the robot, those contact points projected through each camera land within a tolerance of the mask of the object or the robot (the projection) | `min_pass_fraction` 1.0 for both parts, of the layers `rgb`, `depth`, `force`, `stress`; a sample of 1,000 from at least 1,000 such frames; 4 px |
 | diversity | the object types of the episodes whose files are all clean, those scale counts, reach the minimum, and no frames file is unread or untyped, no two types are one in lower case, no asset or episode is under two types, and every episode's `facts` hold the required kinds. The types of every frames file read are counted beside them, and a table per variable of the facts, the types and the labels of the files read is reported | `min_object_types` 10; `material`, `placement`, `lighting`, `camera` |
 
 The samples: a frame's key is the first 8 bytes of the sha256 of `<seed> NUL <purpose> NUL
 <path> NUL <frame>`, and the frames of the smallest keys are the sample, so one seed draws the
 same frames on any machine, whatever order the files are read in. The projection takes each
 sampled frame's contacts that press on the robot (`is_robot`, and a force that is not 0), its
-camera matrices and its masks, read by the class name `object`: a camera passes when its points
-in view lie within `projection_radius_px` of an object pixel, a frame when every camera that sees
-a point passes, and every camera must see a point in some sampled frame. The 4 px tolerance is a
-placeholder until it is measured on format 2.0 data and agreed with the test lab; the criteria
-file states its provenance, and the report repeats it.
+camera matrices and its masks, read by the class names `object`, `arm` and `gripper`: a camera
+passes when its points in view lie within `projection_radius_px` of a pixel of the object or the
+robot, a frame when every camera that sees a point passes, and every camera must see a point in
+some sampled frame. Such a contact lies between the robot and the object, so from a camera it
+lands on the object, on the robot part in front of it, which hides it, or between them, where a
+pad can hide the object's own pixels. The 4 px tolerance is a placeholder: two pilots of format
+2.0 data, of four object types, measured pressed contacts up to 1.07 px from the object or the
+robot, and it stays until it is measured on the published data and agreed with the test lab. The
+criteria file states its provenance, and the report repeats it.
 
 A run passes only with the script and the criteria file whose sha256 `metadata.yaml` lists: the
 digests of the running script and of the criteria bytes the run applied are compared, so weaker
