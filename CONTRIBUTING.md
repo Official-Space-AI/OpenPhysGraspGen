@@ -58,6 +58,8 @@ release notes.
   3.10–3.14, dependency review, CodeQL) and one approving review from a maintainer
   other than the author (see [GOVERNANCE.md](GOVERNANCE.md)). Branch protection on
   `main` enforces both.
+- Reviews are requested automatically from the maintainers who look after the files
+  a pull request changes, as listed in [`.github/CODEOWNERS`](.github/CODEOWNERS).
 - Maintainers aim to give a first response within **48 hours**.
   This is a goal, not a guarantee.
 - Reviewers focus on correctness, tests, physical units and numerical edge cases,
