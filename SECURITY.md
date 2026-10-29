@@ -46,9 +46,11 @@ The container image is built from the released wheel on a pinned official Python
 image, and its build provenance and SBOM are attested. A release stops on a known
 vulnerability of severity high or above that has a fix. Findings without a fix are
 mostly in the base image's Debian packages. The action on each is decided within a
-day of finding it for severity critical, a week for high, a month for medium and
-three months below. Those of severity high or above are also assessed one by one in
-a public issue before the first release that ships them: a finding in code that the
+time set by its CVSS score, as the
+[response targets](docs/oss/vulnerability-log.md#response-targets) give: a day from
+9.0, a week from 7.0, a month from 4.0 and three months below. Those scoring 7.0 or
+above are also assessed one by one in a public issue before the first release that
+ships them: a finding in code that the
 image does not contain or never runs is recorded as not affected, with the reason,
 and any other is accepted only until a stated date, when it is assessed again. The
 quarterly `re-evaluation` issue reviews all of them again. The full Grype report is

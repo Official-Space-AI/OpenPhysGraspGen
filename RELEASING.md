@@ -32,8 +32,8 @@ because that is the import name of the project's internal solver package (#28).
 1. Open a pull request that sets `version` in `pyproject.toml` (for example `1.0.0rc1`) and
    updates the roadmap in the README if needed. Merge it after review.
 2. Check the Grype report of the latest `Image` run on `main` (its `image-scan` artifact):
-   every finding of severity high or above without a fix needs an assessment, as described
-   under "Findings without a fix". Then tag the merge commit and push the tag:
+   every finding without a fix that scores CVSS 7.0 or above needs an assessment, as
+   described under "Findings without a fix". Then tag the merge commit and push the tag:
 
    ```sh
    git switch main && git pull
@@ -42,8 +42,8 @@ because that is the import name of the project's internal solver package (#28).
    ```
 
 3. Before approving the `pypi` environment deployment, open this run's `image-scan` artifact
-   and check that every finding of severity high or above without a fix is assessed, as in
-   step 2: the run scans with a newer vulnerability database than the `main` run did. The run
+   and check that every finding without a fix that scores CVSS 7.0 or above is assessed, as
+   in step 2: the run scans with a newer vulnerability database than the `main` run did. The run
    asks for the approval only after the build and the image have passed every check. Then
    check that the release page has the seven assets and that the image is in the registry.
 4. Attach the image's source to the release as `openphysgraspgen-image-<version>-sources.tar`,
@@ -160,10 +160,13 @@ the digest is old, update the digest:
 
 The image's vulnerability gate fails only on a vulnerability of severity high or above that
 has a fix. Findings without a fix are mostly in the base image's Debian packages. Decide
-the action on each within a day of finding it for severity critical, a week for high, a
-month for medium and three months below. Assess each one of severity high or above also
-before the first release that ships it, in the base image's evaluation issue or in an
-issue labelled `re-evaluation`:
+the action on each within the time that its CVSS score sets in the
+[response targets](docs/oss/vulnerability-log.md#response-targets): a day from 9.0, a week
+from 7.0, a month from 4.0 and three months below. The report's severity is not that
+score, since for a Debian package Grype gives Debian's own rating, so read the score in
+the report's CVSS entries. Assess each one that scores 7.0 or above also before the first
+release that ships it, in the base image's evaluation issue or in an issue labelled
+`re-evaluation`:
 
 - When the image does not contain or never runs the vulnerable code, record it as not
   affected, with the reason: for example a command that the image never runs, a function
