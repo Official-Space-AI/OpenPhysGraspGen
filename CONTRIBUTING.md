@@ -75,7 +75,10 @@ dependency is needed. The dependency review check on pull requests passes only
 for licenses in the allowed class listed in
 [`.github/dependency-review-config.yml`](.github/dependency-review-config.yml); a
 dependency under any other license is added there as an exception once its
-evaluation is approved.
+evaluation is approved. The license classes are in
+[docs/oss/license-policy.md](docs/oss/license-policy.md), the evaluation steps in
+[docs/oss/evaluation.md](docs/oss/evaluation.md), and what we use today in
+[docs/oss/inventory.md](docs/oss/inventory.md).
 
 ## License and sign-off
 
