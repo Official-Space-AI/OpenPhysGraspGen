@@ -62,6 +62,16 @@ openphysgraspgen benchmark pg-t1 path/to/dataset --json pg-t1.json
 `pg-t1.episodes.jsonl`에 저장합니다. 채점 규칙은
 [docs/benchmark/pg-t1.md](docs/benchmark/pg-t1.md)에 있습니다.
 
+데이터셋에 들어 있는 검사 스크립트로 데이터셋 시험의 네 항목(scale, metadata,
+consistency, diversity)을 검사합니다. `metadata.yaml`이 있는 데이터셋 루트에서 실행합니다.
+
+```bash
+python -I tools/check_dataset.py . --seed <the tester's seed>
+```
+
+Python 3.10 이상과 NumPy, PyArrow, PyYAML만 있으면 되고, 이 패키지는 필요 없습니다.
+옵션, 합격 기준, 보고서 내용은 [The check](docs/dataset/format.md#the-check)에 있습니다.
+
 구성방정식을 직접 계산하는 예시와 Newton 접촉 라벨 기록 예시는
 [영문 README](README.md#quick-start)에 있습니다.
 
