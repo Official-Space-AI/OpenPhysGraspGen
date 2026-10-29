@@ -14,6 +14,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import statistics
 import sys
 import urllib.request
@@ -42,6 +43,10 @@ FIELDS = [
 ]
 # Authors whose issues and pull requests are not waiting for a maintainer's answer.
 MAINTAINERS = {"OWNER", "MEMBER", "COLLABORATOR"}
+# GitHub reports MEMBER only to a token that can see the membership, so the workflow's
+# token sees a maintainer with a private membership as CONTRIBUTOR; the maintainers
+# table in GOVERNANCE.md names them by login.
+GOVERNANCE = Path(__file__).resolve().parents[1] / "GOVERNANCE.md"
 WAIT = timedelta(days=7)
 
 Fetch = Callable[[str], Any]
@@ -79,6 +84,18 @@ def is_bot(user: dict[str, Any] | None) -> bool:
     return user is None or user.get("type") == "Bot"
 
 
+def maintainer_logins(path: Path) -> set[str]:
+    """The logins linked in the "Current maintainers" table of GOVERNANCE.md."""
+    logins: set[str] = set()
+    in_table = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            in_table = line.strip("# ").lower() == "current maintainers"
+        elif in_table and line.startswith("|"):
+            logins.update(re.findall(r"\(https://github\.com/([A-Za-z0-9-]+)\)", line))
+    return logins
+
+
 def first_response(fetch: Fetch, repo: str, item: dict[str, Any]) -> datetime | None:
     """The earliest comment or review by a person other than the author."""
     author = item["user"]["login"]
@@ -101,7 +118,11 @@ def first_response(fetch: Fetch, repo: str, item: dict[str, Any]) -> datetime | 
 
 
 def collect(
-    fetch: Fetch, repo: str, month: str, now: datetime | None = None
+    fetch: Fetch,
+    repo: str,
+    month: str,
+    now: datetime | None = None,
+    maintainers: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     start = datetime.strptime(month, "%Y-%m").replace(tzinfo=timezone.utc)
     end = (start + timedelta(days=32)).replace(day=1)
@@ -128,7 +149,9 @@ def collect(
     outside = [
         i
         for i in items
-        if within(i["created_at"]) and i["author_association"] not in MAINTAINERS
+        if within(i["created_at"])
+        and i["author_association"] not in MAINTAINERS
+        and i["user"]["login"] not in maintainers
     ]
     response_hours, waiting = [], 0
     for item in outside:
@@ -210,7 +233,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--csv", type=Path, help="add the row to this CSV")
     args = parser.parse_args(argv)
 
-    row = collect(get, args.repo, args.month)
+    row = collect(
+        get, args.repo, args.month, maintainers=frozenset(maintainer_logins(GOVERNANCE))
+    )
     json.dump(row, sys.stdout, indent=2)
     print()
     if args.csv:
