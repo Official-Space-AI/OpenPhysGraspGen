@@ -7,6 +7,10 @@
 # Every file: the project lead and the maintainer for repository operations.
 *                                       @oollccddss @kms8720
 
+# Code review: the code and its tests.
+/src/                                   @oollccddss @songgyujeong @wissingj
+/tests/                                 @oollccddss @songgyujeong @wissingj
+
 # Repository operations, CI and community.
 /.github/                               @kms8720
 /CONTRIBUTING.md                        @kms8720
@@ -26,7 +30,7 @@
 /.github/scripts/                       @oollccddss
 
 # The dataset.
-/src/openphysgraspgen/dataset/          @oollccddss
+/src/openphysgraspgen/dataset/          @oollccddss @songgyujeong @wissingj
 /docs/dataset/                          @oollccddss
 
 # Governance, licensing and security.
