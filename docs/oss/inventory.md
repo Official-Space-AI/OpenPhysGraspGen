@@ -33,7 +33,7 @@ Not installed with the package and not distributed.
 
 | Component | Accepted | Resolves to | License | Used for | Evaluation | Status |
 |---|---|---|---|---|---|---|
-| setuptools | `>=77` (`[build-system]`) | 84.2.1 | MIT | Build backend | [#66][66] | Approved 2026-10-27, on condition that the floor is raised to `>=84.1.0` before 1.0.0rc1 |
+| setuptools | `>=84.1.0` (`[build-system]`) | 84.2.1 | MIT | Build backend | [#66][66] | Approved 2026-10-27, on condition that the floor is raised to `>=84.1.0` before 1.0.0rc1, which [PR #82][82] did on 2026-10-29 |
 | build | `==1.6.1` | 1.6.1 | MIT | Building the sdist and wheel in CI and releases | [#66][66] | Approved 2026-10-27 |
 | twine | `==7.0.0` | 7.0.0 | Apache-2.0 | `twine check --strict` before the PyPI upload | [#66][66] | Approved 2026-10-27 |
 | pytest | `>=9.0.3` (`dev` extra) | 9.1.1 | MIT | Tests | [#50][50] | Approved 2026-10-27; the floor condition is met ([PR #54](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/54)) |
@@ -81,3 +81,4 @@ each action to a commit SHA. All are covered by [#51][51] (approved 2026-10-27).
 [52]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/52
 [66]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/66
 [72]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/72
+[82]: https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/82
