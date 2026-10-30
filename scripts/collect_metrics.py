@@ -31,6 +31,7 @@ FIELDS = [
     "issues_closed",
     "prs_opened",
     "prs_merged",
+    "median_pr_lead_time_hours",
     "outside_items_opened",
     "median_first_response_hours",
     "items_without_response_7d",
@@ -169,6 +170,11 @@ def collect(
         p["user"]["login"] for p in merged if parse(p["merged_at"]) < start
     }
     authors_now = {p["user"]["login"] for p in merged if within(p["merged_at"])}
+    lead_hours = [
+        (parse(p["merged_at"]) - parse(p["created_at"])).total_seconds() / 3600
+        for p in merged
+        if within(p["merged_at"])
+    ]
 
     good_first = [
         i
@@ -196,6 +202,9 @@ def collect(
         "issues_closed": sum(within(i["closed_at"]) for i in issues),
         "prs_opened": sum(within(p["created_at"]) for p in pulls),
         "prs_merged": sum(within(p["merged_at"]) for p in merged),
+        "median_pr_lead_time_hours": (
+            round(statistics.median(lead_hours), 1) if lead_hours else ""
+        ),
         "outside_items_opened": len(outside),
         "median_first_response_hours": (
             round(statistics.median(response_hours), 1) if response_hours else ""

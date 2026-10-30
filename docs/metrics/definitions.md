@@ -31,6 +31,7 @@ private organization membership.
 | `collected_at` | The UTC date the row was computed. A month that was still running is counted up to that moment | Tells a partial month from a full one |
 | `issues_opened`, `issues_closed` | Issues, not pull requests, created or closed in the month | Inflow and throughput |
 | `prs_opened`, `prs_merged` | Pull requests created or merged in the month | Contribution flow |
+| `median_pr_lead_time_hours` | For pull requests merged in the month: the median time from creation to merge. Empty when none was merged | How long a change waits for review and checks; a rising value means the workflow is slowing down |
 | `outside_items_opened` | Issues and pull requests created in the month by outside authors | How much reaches us from outside |
 | `median_first_response_hours` | For those outside items: the median time from creation to the first comment or review by someone other than the author. Empty when there were none | Responsiveness; [COMMUNITY.md](../../COMMUNITY.md) promises first triage within 48 hours |
 | `items_without_response_7d` | Outside items created in the month that waited more than 7 days for a first response from someone other than the author, whether one came later or not | People left waiting; target 0 |
@@ -45,22 +46,26 @@ issues filed from other channels (`community` label), and maintainer hours.
 
 ## Baseline and targets
 
-| Metric | Baseline (2026-09) | October 2026 (to the 27th) | Target (2026-12) |
+| Metric | Baseline (2026-09) | October 2026 (to the 30th) | Target (2026-12) |
 |---|---|---|---|
 | Median first response to outside items | none opened | 7.8 h (2 items) | ≤ 48 h |
+| Median pull request lead time | none merged | 22.5 h (39 pull requests) | ≤ 48 h |
 | Outside items without a response after 7 days | 0 | 0 | 0 |
 | Outside pull request authors | 0 | 2 | set at the November review |
 | Open `good first issue` | 0 | 5 | ≥ 5 |
-| Releases with SBOM | none released | none released | every release |
+| Releases with SBOM | none released | 1 of 1 (`1.0.0rc1`) | every release |
 
 September had no public activity: the repository was published on 2026-08-25 with
 three pull requests by one maintainer, and work resumed in the open on 2026-10-22.
-The rows in `kpi.csv` for August to October were collected on 2026-10-27, and the
-1 November run replaces the October row with the full month.
+The rows in `kpi.csv` for August to October were collected on 2026-10-30, when the
+lead time column was added, and the 1 November run replaces the October row with the
+full month.
 
 ## Review
 
 Each month the maintainers look at the new row, post a short summary in
 [Discussions → Announcements](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions/categories/announcements),
 and open at most one or two improvement issues, each with an owner, a due date and
-what counts as done. The targets themselves are reviewed every quarter.
+what counts as done. When the median lead time is above its target, one of them looks
+at where pull requests waited: for a first review, for changes, or for checks. The
+targets themselves are reviewed every quarter.

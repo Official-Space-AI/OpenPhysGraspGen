@@ -1,4 +1,4 @@
-month,collected_at,issues_opened,issues_closed,prs_opened,prs_merged,outside_items_opened,median_first_response_hours,items_without_response_7d,outside_pr_authors,first_time_contributors,repeat_contributors,open_good_first_issues,releases,releases_with_sbom
-2026-08,2026-10-27,0,0,3,3,0,,0,0,1,0,0,0,0
-2026-09,2026-10-27,0,0,0,0,0,,0,0,0,0,0,0,0
-2026-10,2026-10-27,42,16,29,18,2,7.8,0,2,1,1,5,0,0
+month,collected_at,issues_opened,issues_closed,prs_opened,prs_merged,median_pr_lead_time_hours,outside_items_opened,median_first_response_hours,items_without_response_7d,outside_pr_authors,first_time_contributors,repeat_contributors,open_good_first_issues,releases,releases_with_sbom
+2026-08,2026-10-30,0,0,3,3,0.1,0,,0,0,1,0,0,0,0
+2026-09,2026-10-30,0,0,0,0,,0,,0,0,0,0,0,0,0
+2026-10,2026-10-30,52,29,43,39,22.5,2,7.8,0,2,2,1,5,1,1
