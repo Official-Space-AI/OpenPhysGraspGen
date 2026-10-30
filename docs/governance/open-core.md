@@ -11,7 +11,7 @@ this scope.
 | Part | Contents | License |
 |---|---|---|
 | The `openphysgraspgen` package (this repository) | Constitutive laws, contact sensors, the grasp data recorder and reader, the dataset check and the PG-T1 scorer (with `1.0.0rc1`), examples and documentation | Apache-2.0 |
-| The grasp dataset (Hugging Face Hub, with `1.0.0rc1`) | One million frames of deformable-object grasps with physical ground truth, described in its dataset card | CC-BY-NC-4.0 |
+| The grasp dataset ([Hugging Face Hub](https://huggingface.co/datasets/Official-Space-AI/physgraspgen-dataset), [DOI 10.5281/zenodo.23787395](https://doi.org/10.5281/zenodo.23787395)) | Deformable-object grasps with physical ground truth, described in its dataset card. Release `1.0.0rc1` holds 933,896 frames of five object types; later releases add episodes and object types | CC-BY-NC-4.0 |
 | Benchmarks | PG-T1 with `1.0.0rc1`, PG-T2 and PG-T3 later | Apache-2.0 |
 | The container image (with each release) | The package on the official Python image | Apache-2.0. The base image's packages keep their own licenses |
 
@@ -27,7 +27,6 @@ repository.
 - Simulation assets with industry-specific material data calibrated against
   measurements.
 - Robot learning data generated for a customer's own objects.
-- A hosted robot learning platform (planned).
 
 Customers of these offerings get commercial support. Community support for the open
 parts is described in [COMMUNITY.md](../../COMMUNITY.md).
@@ -38,16 +37,16 @@ parts is described in [COMMUNITY.md](../../COMMUNITY.md).
    public benchmarks is open.
 2. Accuracy for production use, calibrated industrial material data, customer-specific
    data and integration, and hosted services are commercial.
-3. When a new part could go either way, we ask who needs it most. If it is
-   individual researchers and developers, it is open; if it is a company running a
-   production line, it is commercial.
+3. When a new part could go either way, the project lead decides, as
+   [GOVERNANCE.md](../../GOVERNANCE.md) describes. As a guide, we ask who needs it
+   most: individual researchers and developers point to open, a company running a
+   production line points to commercial.
 
 ## What we commit to
 
-1. What is needed to write, read and check the public dataset and to reproduce the
-   public benchmarks stays open source, with no limits on use, time or scale.
-2. Released versions keep their licenses: Apache-2.0 for the code and CC-BY-NC-4.0 for
-   the dataset.
+1. Each dataset release comes with the tools needed to write, read and check it and to
+   reproduce its published benchmark numbers, under Apache-2.0.
+2. Released versions keep the licenses they were released under.
 3. This page lists the commercial offerings, and the release notes announce any
    change to the line between open and commercial.
 
