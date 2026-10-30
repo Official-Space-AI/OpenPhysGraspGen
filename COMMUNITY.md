@@ -25,6 +25,7 @@ vulnerabilities in any public channel.
 - Hours: weekdays 09:00–18:00, Asia/Seoul (KST)
 - First triage of new issues and discussions: within **48 hours**
 - Answers in community channels are best effort and are not a support contract.
+  [SUPPORT.md](SUPPORT.md) describes the commercial support SpaceAI plans.
 
 ## Triage
 
