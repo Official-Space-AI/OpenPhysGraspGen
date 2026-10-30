@@ -42,6 +42,8 @@ jobs:
         run: |
           python -m venv --without-pip "$RUNNER_TEMP/release-env"
           pip --python "$RUNNER_TEMP/release-env/bin/python" install dist/*.whl
+      # The SBOM action writes its file but does not create the folder.
+      - run: mkdir sbom
       - name: Generate the SPDX SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3 (Syft v1.54.0)
         with:
