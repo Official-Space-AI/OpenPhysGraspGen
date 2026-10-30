@@ -48,6 +48,10 @@ PhysGraspGen is developed as open core. The boundary is:
 |---|---|---|
 | Constitutive laws, contact sensors, data recorder, calibration and transfer pipeline, benchmarks, examples, documentation | Grasp dataset and its dataset card | High-precision solver core, customer data and customer-specific code, internal infrastructure |
 
+[docs/governance/open-core.md](docs/governance/open-core.md) lists the commercial
+offerings, explains how a new part is assigned to one side, and states what the
+project commits to for the open side.
+
 Before any code, data or model leaves the private repository, a maintainer fills
 in the **OSS evaluation** issue form (gate: *publish our OSS*) and confirms that:
 

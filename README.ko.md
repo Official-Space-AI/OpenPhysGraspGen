@@ -94,6 +94,9 @@ Python 3.10 이상과 NumPy, PyArrow, PyYAML만 있으면 되고, 이 패키지�
 | 벤치마크와 재현 스크립트 | 이 저장소 (PG-T1은 `1.0.0rc1`, 나머지는 `1.0.0`) | Apache-2.0 |
 | 고정밀 솔버 코어 | 비공개 | 상용 |
 
+상용 제품, 공개와 상용을 나누는 기준, 공개 쪽 약속은
+[docs/governance/open-core.md](docs/governance/open-core.md)(영문)를 참고하세요.
+
 ## 개발 방식
 
 PhysGraspGen의 일상 개발은 고객별 코드가 함께 있는 비공개 저장소에서 이루어집니다.

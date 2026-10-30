@@ -144,6 +144,10 @@ PhysGraspGen is developed as open core.
 | Benchmarks and reproduction scripts | This repository (PG-T1 with `1.0.0rc1`, the rest with `1.0.0`) | Apache-2.0 |
 | High-precision solver core | Not published | Commercial |
 
+What SpaceAI offers commercially, how a new part is assigned to one side, and what
+the project commits to for the open side are in
+[docs/governance/open-core.md](docs/governance/open-core.md).
+
 ## How development works
 
 Day-to-day development of PhysGraspGen happens in a private repository that also
