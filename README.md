@@ -162,6 +162,7 @@ request, and releases ship with release notes and an SBOM.
 - Questions and ideas: [GitHub Discussions](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions)
 - Bugs: [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)
 - Where to ask what, and response times: [COMMUNITY.md](COMMUNITY.md)
+- Community and commercial support: [SUPPORT.md](SUPPORT.md)
 - Security vulnerabilities: [SECURITY.md](SECURITY.md) (please do not open a public issue)
 
 Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the

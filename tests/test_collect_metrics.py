@@ -115,6 +115,7 @@ def test_a_month_is_counted(api):
         "issues_closed": 1,
         "prs_opened": 3,
         "prs_merged": 2,
+        "median_pr_lead_time_hours": 48.0,
         "outside_items_opened": 2,
         "median_first_response_hours": 5.0,
         "items_without_response_7d": 1,

@@ -110,6 +110,7 @@ request로 들어오고, 릴리스는 릴리스 노트와 SBOM을 붙여 배포�
 - 질문·아이디어: [GitHub Discussions](https://github.com/Official-Space-AI/OpenPhysGraspGen/discussions)
 - 버그: [GitHub Issues](https://github.com/Official-Space-AI/OpenPhysGraspGen/issues)
 - 어디에 무엇을 물어야 하는지, 응답 시간: [COMMUNITY.md](COMMUNITY.md)
+- 커뮤니티 지원과 상용 지원: [SUPPORT.md](SUPPORT.md)
 - 보안 취약점: [SECURITY.md](SECURITY.md) (공개 이슈로 올리지 마세요)
 
 기여는 [CONTRIBUTING.md](CONTRIBUTING.md)부터 읽어 주세요. 참여하는 모든 사람은
