@@ -12,8 +12,8 @@ SpaceAI PhysGraspGen 프로젝트의 공개 부분이며, 순수 Python·NumPy�
 있습니다. 센서 레이어는 [NVIDIA Newton](https://github.com/newton-physics/newton)
 (VBD solver)의 접촉 버퍼를 읽습니다.
 
-> **현재 상태: 공개 베타(`0.1.0b0`).** 마이너 버전 사이에 API가 바뀔 수 있습니다.
-> 릴리스 후보(RC)에 들어갈 내용은 [로드맵](#로드맵)을 보세요.
+> **현재 상태: 릴리스 후보(`1.0.0rc1`).** `1.0.0` 전까지 API가 바뀔 수 있습니다.
+> 다음 릴리스에 들어갈 내용은 [로드맵](#로드맵)을 보세요.
 
 ## 구성
 
@@ -30,13 +30,13 @@ SpaceAI PhysGraspGen 프로젝트의 공개 부분이며, 순수 Python·NumPy�
 
 ## 설치
 
-Python 3.10 이상이 필요합니다. 패키지 이름은 `openphysgraspgen`이고, `1.0.0rc1`부터 PyPI에 올라갑니다.
+Python 3.10 이상이 필요합니다. PyPI 패키지 이름은 `openphysgraspgen`입니다.
 
 ```bash
 pip install openphysgraspgen
 ```
 
-그 전까지는 GitHub에서 설치합니다.
+`main`의 최신 상태를 설치하려면 GitHub에서 설치합니다.
 
 ```bash
 pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"

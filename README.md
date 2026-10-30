@@ -3,7 +3,7 @@
 [![CI](https://github.com/Official-Space-AI/OpenPhysGraspGen/actions/workflows/ci.yml/badge.svg)](https://github.com/Official-Space-AI/OpenPhysGraspGen/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Status](https://img.shields.io/badge/status-public%20beta-orange)
+![Status](https://img.shields.io/badge/status-release%20candidate-yellow)
 
 [한국어 README](README.ko.md)
 
@@ -17,9 +17,8 @@ It is the open part of SpaceAI's PhysGraspGen project. The library is pure Pytho
 and NumPy, with sensor layers that read contact buffers from
 [NVIDIA Newton](https://github.com/newton-physics/newton) (VBD solver).
 
-> **Status: public beta (`0.1.0b0`).** APIs can still change between minor
-> versions. See the [roadmap](#roadmap) for what is coming in the release
-> candidate.
+> **Status: release candidate (`1.0.0rc1`).** APIs can still change before `1.0.0`.
+> See the [roadmap](#roadmap) for what comes next.
 
 ## What is included
 
@@ -36,14 +35,13 @@ this repository. See [Scope of the open release](#scope-of-the-open-release).
 
 ## Install
 
-Python 3.10 or newer. The package is `openphysgraspgen` and is published on PyPI from
-`1.0.0rc1`:
+Python 3.10 or newer. The package is `openphysgraspgen` on PyPI:
 
 ```bash
 pip install openphysgraspgen
 ```
 
-Until that release, install from GitHub:
+To install the latest `main` instead:
 
 ```bash
 pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
