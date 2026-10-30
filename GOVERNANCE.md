@@ -36,17 +36,21 @@ reports and security issues.
   dropping a supported Python version) start as an issue labelled `proposal`.
   The proposal stays open for at least 5 business days. If no maintainer objects,
   it is accepted (lazy consensus). If there is an objection that cannot be
-  resolved, the project lead decides and records the reason in the issue.
-- Decisions made elsewhere (meetings, chat) are written back to the relevant
-  issue or discussion. A decision that is not recorded on GitHub is not final.
+  resolved, the project lead decides and records the reason in the issue. For a
+  time-critical change the project lead can close the proposal period early and
+  records why.
+- Technical decisions about this repository that are made elsewhere (meetings,
+  chat) are summarized in the relevant issue or discussion; one that is not
+  recorded there is not final. Business, customer and commercial-product
+  decisions are outside the scope of this document.
 
 ## What is published
 
 PhysGraspGen is developed as open core. The boundary is:
 
-| Published here (Apache-2.0) | Published on Hugging Face (CC-BY-4.0) | Not published |
+| Published here (Apache-2.0) | Published on Hugging Face (CC-BY-NC-4.0) | Not published |
 |---|---|---|
-| Constitutive laws, contact sensors, data recorder, calibration and transfer pipeline, benchmarks, examples, documentation | Grasp dataset and its dataset card | High-precision solver core, customer data and customer-specific code, internal infrastructure |
+| Constitutive laws, contact sensors, data recorder, calibration and transfer pipeline, benchmarks, examples, documentation | Grasp dataset and its dataset card | High-precision solver core; raw measurement data, material cards and tuning parameters; the production data pipeline; customer data and customer-specific code; internal infrastructure |
 
 Before any code, data or model leaves the private repository, a maintainer fills
 in the **OSS evaluation** issue form (gate: *publish our OSS*) and confirms that:
@@ -55,7 +59,10 @@ in the **OSS evaluation** issue form (gate: *publish our OSS*) and confirms that
 2. It contains no secrets, personal data, customer information or trade secrets.
 3. `LICENSE` and any required `NOTICE` are present and correct.
 4. There are no known critical vulnerabilities or unsafe defaults.
-5. The project lead has approved the publication.
+5. Nothing in the change is the subject of a planned patent application that has
+   not been filed yet, unless the project lead approves publishing it; the
+   publication date is recorded in the issue.
+6. The project lead has approved the publication.
 
 ## Releases
 
@@ -71,6 +78,7 @@ in the **OSS evaluation** issue form (gate: *publish our OSS*) and confirms that
    provenance attestations.
 4. The release is announced in Discussions → Announcements.
 
+Step-by-step instructions are in [RELEASING.md](RELEASING.md).
 
 Versioning follows [Semantic Versioning](https://semver.org/) with PEP 440
 pre-release suffixes (`0.1.0b0`, `1.0.0rc1`).
@@ -88,17 +96,29 @@ alternatives) and is then listed there as an exception.
 
 A contributor with sustained, high-quality contributions over at least three
 months (code, reviews, triage or documentation) can be nominated by a maintainer.
-Nomination is an issue; it passes with no objection from existing maintainers in
-5 business days. Maintainers who are inactive for six months move to emeritus
-status and can return on request.
+Nomination is an issue; existing maintainers have 5 business days to comment, and
+the project lead then decides on the appointment. Maintainers who are inactive
+for six months move to emeritus status and can return on request.
 
 ## How governance will evolve
+
+The project may move through these stages; the project lead decides when a move
+is made, through a change to this document.
 
 | Stage | When | Model |
 |---|---|---|
 | 1. Project lead | Now | SpaceAI maintainers; project lead has the final say |
-| 2. Core team | After `1.0.0`, once there are regular outside contributors | Outside maintainers join; decisions by maintainer vote |
-| 3. Steering group | When multiple organizations depend on the project | A steering group with members from several organizations sets direction |
+| 2. Core team | After `1.0.0`, once there are regular outside contributors | Outside maintainers may join; decisions by maintainer vote |
+| 3. Steering group | When multiple organizations depend on the project | A steering group with members from several organizations may set the direction of this repository |
+
+At every stage, governance covers this repository. SpaceAI keeps the project's
+names, the commercial solver core and its own products under its own decisions.
+
+## Trademarks
+
+SpaceAI, PhysGraspGen and OpenPhysGraspGen are names of SpaceAI. The Apache
+License does not grant permission to use them (section 6). Forks and derived
+distributions should use a different name.
 
 ## Changing this document
 
