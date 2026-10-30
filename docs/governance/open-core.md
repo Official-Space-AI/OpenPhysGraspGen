@@ -20,16 +20,17 @@ benchmark numbers from it.
 
 ## What is commercial
 
-SpaceAI offers the following under commercial terms. They are developed outside this
-repository.
+SpaceAI develops the following outside this repository, to be offered under
+commercial terms.
 
 - A high-precision solver for production use, under a commercial license.
 - Simulation assets with industry-specific material data calibrated against
   measurements.
 - Robot learning data generated for a customer's own objects.
 
-Customers of these offerings get commercial support. Community support for the open
-parts is described in [COMMUNITY.md](../../COMMUNITY.md).
+Commercial support for these offerings is planned. [SUPPORT.md](../../SUPPORT.md)
+describes it next to the community support for the open parts, which
+[COMMUNITY.md](../../COMMUNITY.md) details.
 
 ## Where the line is
 
@@ -52,6 +53,9 @@ parts is described in [COMMUNITY.md](../../COMMUNITY.md).
 
 If rights, privacy, legal or security problems force us to take something down or to
 withdraw a release, we remove only what is affected and say so in this repository.
+
+This page is kept up to date as the offerings and the line change. Changes to it go
+through a pull request, as [GOVERNANCE.md](../../GOVERNANCE.md) describes.
 
 Contributions are accepted under the Developer Certificate of Origin and the
 project's license, as [CONTRIBUTING.md](../../CONTRIBUTING.md) describes.
