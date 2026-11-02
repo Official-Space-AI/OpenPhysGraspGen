@@ -38,7 +38,7 @@ Not installed with the package and not distributed.
 | twine | `==7.0.0` | 7.0.0 | Apache-2.0 | `twine check --strict` before the PyPI upload | [#66][66] | Approved 2026-10-27 |
 | pytest | `>=9.0.3` (`dev` extra) | 9.1.1 | MIT | Tests | [#50][50] | Approved 2026-10-27; the floor condition is met ([PR #54](https://github.com/Official-Space-AI/OpenPhysGraspGen/pull/54)) |
 | pytest-cov, coverage | `>=5` (`dev` extra) | 7.1.0, 7.17.0 | MIT, Apache-2.0 | Test coverage | [#50][50] | Approved 2026-10-27 |
-| Ruff | `==0.17.1` (`dev` extra) | 0.17.1 | MIT | Lint and format | [#49][49] | Approved 2026-10-27 |
+| Ruff | `==0.17.3` (`dev` extra) | 0.17.3 | MIT | Lint and format | [#49][49] | Approved 2026-10-27 |
 | REUSE | `==6.2.0` (CI only) | 6.2.0 | GPL-3.0-or-later (review required) | `reuse lint` | [#48][48] | Approved 2026-10-27, CI only |
 
 ## Container image
