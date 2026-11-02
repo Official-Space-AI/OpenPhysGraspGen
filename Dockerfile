@@ -11,11 +11,11 @@
 # BASE_IMAGE repeats it for the label and NOTICE.container, and
 # .github/scripts/check_image.sh fails when the two differ.
 FROM docker.io/library/python:3.12-slim-trixie@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
-ARG BASE_IMAGE=docker.io/library/python:3.12-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
+ARG BASE_IMAGE=docker.io/library/python:3.12-slim-trixie@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 # The docker-library/python Dockerfile that built the base image, at the commit that the
 # org.opencontainers.image.source annotation of its linux/amd64 manifest names, for
 # NOTICE.container. check_image.sh fails when it does not match that annotation.
-ARG BASE_DOCKERFILE=https://github.com/docker-library/python/blob/2a3b794c223ab067d122719541cdd54a068732a5/3.12/slim-trixie/Dockerfile
+ARG BASE_DOCKERFILE=https://github.com/docker-library/python/blob/3d7e95597e56a415d9e4abc0f15877e005d2cb2e/3.12/slim-trixie/Dockerfile
 
 # NumPy, PyArrow and PyYAML come at the exact versions in docker/requirements.txt, as
 # wheels, so the image holds what was reviewed and a rebuild of a tag holds the same.
