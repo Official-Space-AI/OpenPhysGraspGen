@@ -119,6 +119,8 @@ def test_a_month_is_counted(api):
         "outside_items_opened": 2,
         "median_first_response_hours": 5.0,
         "items_without_response_7d": 1,
+        "qa_questions_opened": "",
+        "qa_questions_answered": "",
         "outside_pr_authors": 1,
         "first_time_contributors": 1,
         "repeat_contributors": 1,
@@ -126,6 +128,94 @@ def test_a_month_is_counted(api):
         "releases": 2,
         "releases_with_sbom": 1,
     }
+
+
+def discussion(login, created, association="NONE", qa=True, chosen=None, replies=()):
+    return {
+        "createdAt": created,
+        "authorAssociation": association,
+        "author": None if login is None else {"__typename": "User", "login": login},
+        "category": {"isAnswerable": qa},
+        "answerChosenAt": chosen,
+        "comments": {
+            "nodes": [
+                {"createdAt": at, "author": {"__typename": kind, "login": who}}
+                for who, at, kind in replies
+            ]
+        },
+    }
+
+
+def fake_query(pages):
+    def query(text, variables):
+        index = int(variables["after"] or 0)
+        return {
+            "repository": {
+                "discussions": {
+                    "nodes": pages[index],
+                    "pageInfo": {
+                        "hasNextPage": index + 1 < len(pages),
+                        "endCursor": str(index + 1),
+                    },
+                }
+            }
+        }
+
+    return query
+
+
+def test_questions_in_q_and_a_are_counted(api):
+    pages = [
+        [
+            # Answered by a maintainer 5 hours later.
+            discussion(
+                "visitor",
+                "2026-10-03T00:00:00Z",
+                replies=[("lead", "2026-10-03T05:00:00Z", "User")],
+            ),
+            # Only the asker wrote again: not answered.
+            discussion(
+                "asker",
+                "2026-10-04T00:00:00Z",
+                replies=[("asker", "2026-10-04T01:00:00Z", "User")],
+            ),
+            # Asked by maintainers: not counted.
+            discussion("lead", "2026-10-05T00:00:00Z", "MEMBER"),
+            discussion("teammate", "2026-10-05T00:00:00Z", "CONTRIBUTOR"),
+            # Not in a category that takes an answer.
+            discussion("visitor", "2026-10-06T00:00:00Z", qa=False),
+        ],
+        [
+            # An answer was marked.
+            discussion("helper", "2026-10-20T00:00:00Z", chosen="2026-10-21T00:00:00Z"),
+            # Only a bot replied: not answered.
+            discussion(
+                "visitor",
+                "2026-10-22T00:00:00Z",
+                replies=[("helper-bot", "2026-10-22T01:00:00Z", "Bot")],
+            ),
+            # Replied to after the month: not answered in October.
+            discussion(
+                "visitor",
+                "2026-10-30T00:00:00Z",
+                replies=[("lead", "2026-11-02T00:00:00Z", "User")],
+            ),
+            # Asked the month before, and by a deleted account.
+            discussion("visitor", "2026-09-28T00:00:00Z"),
+            discussion(None, "2026-10-07T00:00:00Z"),
+        ],
+    ]
+    end = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    row = metrics.collect(
+        fake(api),
+        REPO,
+        "2026-10",
+        now=end,
+        maintainers=frozenset({"teammate"}),
+        query=fake_query(pages),
+    )
+    assert row["qa_questions_opened"] == 5
+    assert row["qa_questions_answered"] == 2
 
 
 def test_a_running_month_stops_at_now(api):
@@ -189,6 +279,19 @@ def test_the_maintainers_are_read_from_the_governance_table(tmp_path):
 def test_the_repository_governance_names_its_maintainers():
     logins = metrics.maintainer_logins(metrics.GOVERNANCE)
     assert {"oollccddss", "kms8720"} <= logins
+
+
+def test_columns_added_later_are_empty_in_earlier_rows(tmp_path):
+    path = tmp_path / "kpi.csv"
+    path.write_text("month,collected_at,prs_merged\n2026-09,2026-10-01,3\n")
+    empty = dict.fromkeys(metrics.FIELDS, 0)
+    metrics.write_row(path, {**empty, "month": "2026-10", "qa_questions_opened": 2})
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert list(rows[0]) == metrics.FIELDS
+    assert rows[0]["prs_merged"] == "3"
+    assert rows[0]["qa_questions_opened"] == ""
+    assert rows[1]["qa_questions_opened"] == "2"
 
 
 def test_a_row_replaces_the_same_month(tmp_path):

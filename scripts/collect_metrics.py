@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 SpaceAI
 # SPDX-License-Identifier: Apache-2.0
-"""Collect one month of project health metrics from the GitHub REST API.
+"""Collect one month of project health metrics from the GitHub REST and GraphQL APIs.
 
 Usage: python scripts/collect_metrics.py 2026-10 [--repo owner/name] [--csv PATH]
 
-docs/metrics/definitions.md defines every column. Set GITHUB_TOKEN to raise the API
-rate limit. Only the standard library is used.
+docs/metrics/definitions.md defines every column. Set GITHUB_TOKEN to raise the REST
+rate limit; the Discussions columns come from GraphQL, which needs it, and are left
+empty without it. Only the standard library is used.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ FIELDS = [
     "outside_items_opened",
     "median_first_response_hours",
     "items_without_response_7d",
+    "qa_questions_opened",
+    "qa_questions_answered",
     "outside_pr_authors",
     "first_time_contributors",
     "repeat_contributors",
@@ -51,6 +54,27 @@ GOVERNANCE = Path(__file__).resolve().parents[1] / "GOVERNANCE.md"
 WAIT = timedelta(days=7)
 
 Fetch = Callable[[str], Any]
+Query = Callable[[str, dict[str, Any]], Any]
+
+# Discussions in categories that take an answer (Q&A), with who wrote them, the time an
+# answer was marked, and their top-level comments.
+QA_QUERY = """
+query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    discussions(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        createdAt
+        authorAssociation
+        author { __typename login }
+        category { isAnswerable }
+        answerChosenAt
+        comments(first: 100) { nodes { createdAt author { __typename login } } }
+      }
+    }
+  }
+}
+"""
 
 
 def get(path: str) -> Any:
@@ -61,6 +85,17 @@ def get(path: str) -> Any:
         request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request) as response:
         return json.load(response)
+
+
+def graphql(query: str, variables: dict[str, Any]) -> Any:
+    body = json.dumps({"query": query, "variables": variables}).encode()
+    request = urllib.request.Request(API + "/graphql", data=body, method="POST")
+    request.add_header("Authorization", f"Bearer {os.environ['GITHUB_TOKEN']}")
+    with urllib.request.urlopen(request) as response:
+        result = json.load(response)
+    if result.get("errors"):
+        raise RuntimeError(f"GraphQL: {result['errors']}")
+    return result["data"]
 
 
 def get_all(fetch: Fetch, path: str) -> list[dict[str, Any]]:
@@ -82,7 +117,22 @@ def parse(timestamp: str | None) -> datetime | None:
 
 
 def is_bot(user: dict[str, Any] | None) -> bool:
-    return user is None or user.get("type") == "Bot"
+    """A deleted account or an app; REST gives the kind as type, GraphQL as __typename."""
+    return user is None or "Bot" in (user.get("type"), user.get("__typename"))
+
+
+def qa_discussions(query: Query, repo: str) -> list[dict[str, Any]]:
+    """Every discussion in a category that takes an answer, oldest pages first."""
+    owner, name = repo.split("/")
+    found: list[dict[str, Any]] = []
+    after = None
+    while True:
+        page = query(QA_QUERY, {"owner": owner, "name": name, "after": after})
+        discussions = page["repository"]["discussions"]
+        found += [d for d in discussions["nodes"] if d["category"]["isAnswerable"]]
+        if not discussions["pageInfo"]["hasNextPage"]:
+            return found
+        after = discussions["pageInfo"]["endCursor"]
 
 
 def maintainer_logins(path: Path) -> set[str]:
@@ -124,6 +174,7 @@ def collect(
     month: str,
     now: datetime | None = None,
     maintainers: frozenset[str] = frozenset(),
+    query: Query | None = None,
 ) -> dict[str, object]:
     start = datetime.strptime(month, "%Y-%m").replace(tzinfo=timezone.utc)
     end = (start + timedelta(days=32)).replace(day=1)
@@ -164,6 +215,30 @@ def collect(
             responded is None or responded - created > WAIT
         ):
             waiting += 1
+
+    # Questions asked in Q&A by someone other than a maintainer, and those of them that
+    # had an accepted answer or a reply from someone other than the asker by the cutoff.
+    questions, answered = "", ""
+    if query is not None:
+        asked = [
+            d
+            for d in qa_discussions(query, repo)
+            if within(d["createdAt"])
+            and not is_bot(d["author"])
+            and d["authorAssociation"] not in MAINTAINERS
+            and d["author"]["login"] not in maintainers
+        ]
+        questions = len(asked)
+        answered = sum(
+            within(d["answerChosenAt"])
+            or any(
+                within(c["createdAt"])
+                and not is_bot(c["author"])
+                and c["author"]["login"] != d["author"]["login"]
+                for c in d["comments"]["nodes"]
+            )
+            for d in asked
+        )
 
     merged = [p for p in pulls if p.get("merged_at")]
     authors_before = {
@@ -210,6 +285,8 @@ def collect(
             round(statistics.median(response_hours), 1) if response_hours else ""
         ),
         "items_without_response_7d": waiting,
+        "qa_questions_opened": questions,
+        "qa_questions_answered": answered,
         "outside_pr_authors": len(
             {i["user"]["login"] for i in outside if "pull_request" in i}
         ),
@@ -242,8 +319,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--csv", type=Path, help="add the row to this CSV")
     args = parser.parse_args(argv)
 
+    query = graphql if os.environ.get("GITHUB_TOKEN") else None
+    if query is None:
+        print(
+            "GITHUB_TOKEN is not set: the Discussions columns stay empty",
+            file=sys.stderr,
+        )
     row = collect(
-        get, args.repo, args.month, maintainers=frozenset(maintainer_logins(GOVERNANCE))
+        get,
+        args.repo,
+        args.month,
+        maintainers=frozenset(maintainer_logins(GOVERNANCE)),
+        query=query,
     )
     json.dump(row, sys.stdout, indent=2)
     print()
