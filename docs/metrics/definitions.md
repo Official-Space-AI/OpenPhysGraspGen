@@ -46,10 +46,10 @@ issues filed from other channels (`community` label), and maintainer hours.
 
 ## Baseline and targets
 
-| Metric | Baseline (2026-09) | October 2026 (to the 30th) | Target (2026-12) |
+| Metric | Baseline (2026-09) | October 2026 | Target (2026-12) |
 |---|---|---|---|
 | Median first response to outside items | none opened | 7.8 h (2 items) | ≤ 48 h |
-| Median pull request lead time | none merged | 22.5 h (39 pull requests) | ≤ 48 h |
+| Median pull request lead time | none merged | 22.5 h (41 pull requests) | ≤ 48 h |
 | Outside items without a response after 7 days | 0 | 0 | 0 |
 | Outside pull request authors | 0 | 2 | set at the November review |
 | Open `good first issue` | 0 | 5 | ≥ 5 |
@@ -57,9 +57,8 @@ issues filed from other channels (`community` label), and maintainer hours.
 
 September had no public activity: the repository was published on 2026-08-25 with
 three pull requests by one maintainer, and work resumed in the open on 2026-10-22.
-The rows in `kpi.csv` for August to October were collected on 2026-10-30, when the
-lead time column was added, and the 1 November run replaces the October row with the
-full month.
+The rows in `kpi.csv` for August and September were collected on 2026-10-30, when the
+lead time column was added. The October row is the full month, from the 1 November run.
 
 ## Review
 
