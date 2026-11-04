@@ -47,6 +47,14 @@ To install the latest `main` instead:
 pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
 ```
 
+To check the installed version:
+
+```bash
+openphysgraspgen --version
+```
+
+The same value is exposed in Python as `openphysgraspgen.__version__`.
+
 For development:
 
 ```bash
