@@ -42,6 +42,14 @@ pip install openphysgraspgen
 pip install "git+https://github.com/Official-Space-AI/OpenPhysGraspGen.git"
 ```
 
+설치된 버전을 확인하려면 다음 명령어를 실행합니다.
+
+```bash
+openphysgraspgen --version
+```
+
+동일한 버전 정보는 Python 코드에서 `openphysgraspgen.__version__`으로도 확인할 수 있습니다.
+
 ## 빠른 시작
 
 보정 → 전이 → 데이터 생성 → 추정 → confidence gate 전체 흐름을 작은 합성 문제로
