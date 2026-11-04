@@ -19,6 +19,7 @@ body:
     id: version
     attributes:
       label: openphysgraspgen version or commit
+      description: Run `openphysgraspgen --version` or check `openphysgraspgen.__version__`.
       placeholder: "1.0.0rc1 or a commit SHA"
     validations: {required: true}
   - type: input
