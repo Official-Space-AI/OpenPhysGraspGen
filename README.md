@@ -4,6 +4,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Status](https://img.shields.io/badge/status-release%20candidate-yellow)
+[![PyPI version](https://img.shields.io/pypi/v/openphysgraspgen.svg)](https://pypi.org/project/openphysgraspgen/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23787395.svg)](https://doi.org/10.5281/zenodo.23787395)
 
 [한국어 README](README.ko.md)
 
