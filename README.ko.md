@@ -1,5 +1,8 @@
 # OpenPhysGraspGen
 
+[![PyPI version](https://img.shields.io/pypi/v/openphysgraspgen.svg)](https://pypi.org/project/openphysgraspgen/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23787395.svg)](https://doi.org/10.5281/zenodo.23787395)
+
 [English README](README.md)
 
 OpenPhysGraspGen은 **변형체(deformable object)** 파지 데이터를 물리 라벨과 함께
