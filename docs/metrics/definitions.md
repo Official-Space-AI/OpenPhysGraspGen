@@ -35,14 +35,16 @@ private organization membership.
 | `outside_items_opened` | Issues and pull requests created in the month by outside authors | How much reaches us from outside |
 | `median_first_response_hours` | For those outside items: the median time from creation to the first comment or review by someone other than the author. Empty when there were none | Responsiveness; [COMMUNITY.md](../../COMMUNITY.md) promises first triage within 48 hours |
 | `items_without_response_7d` | Outside items created in the month that waited more than 7 days for a first response from someone other than the author, whether one came later or not | People left waiting; target 0 |
+| `qa_questions_opened` | Discussions opened in the month by outside authors in a category that takes an answer (Q&A). Empty in rows collected without a token, and in rows before 2026-11 | Questions that [COMMUNITY.md](../../COMMUNITY.md) sends to Q&A, which the issue counts miss |
+| `qa_questions_answered` | Those of them that, by the end of the month (or when collected), had an answer marked or a top-level reply from someone other than the asker | Whether questions get an answer; a gap that grows means people are left asking |
 | `outside_pr_authors` | Distinct outside authors who opened a pull request in the month, merged or not | New contributors trying |
 | `first_time_contributors` | Authors whose first merged pull request is in the month | Contributions that land |
 | `repeat_contributors` | Authors with a merged pull request in the month who also had one before | Contributors who come back |
 | `open_good_first_issues` | Issues labelled `good first issue` that were open at the end of the month (or when collected), by the labels they carry now | COMMUNITY.md keeps at least five open |
 | `releases`, `releases_with_sbom` | Releases published in the month, and those with SPDX or CycloneDX assets | SBOM on every release; target 100% |
 
-Not collected by the script yet: Discussions questions and how many were answered,
-issues filed from other channels (`community` label), and maintainer hours.
+Not collected by the script yet: issues filed from other channels (`community` label),
+and maintainer hours.
 
 ## Baseline and targets
 
