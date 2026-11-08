@@ -62,14 +62,14 @@ each action to a commit SHA. All are covered by [#51][51] (approved 2026-10-27).
 | Action | Version on `main` | License | Used for |
 |---|---|---|---|
 | actions/checkout | v7.0.1 (SHA), v7 | MIT | Checking out the repository |
-| actions/setup-python | v7.1.0 (SHA), v6 | MIT | Installing Python |
+| actions/setup-python | v7.1.0 (SHA), v7 | MIT | Installing Python |
 | actions/upload-artifact, actions/download-artifact | v7.0.2, v8.0.2 | MIT | Passing the build between release jobs |
 | actions/dependency-review-action | v5.0.0 | MIT | License and vulnerability check on pull requests |
 | anchore/sbom-action (Syft) | v0.24.3 (Syft v1.54.0) | Apache-2.0 | SPDX and CycloneDX SBOMs for each release |
 | anchore/scan-action (Grype) | v7.4.2 (Grype v0.118.0) | MIT | Vulnerability scan of the release SBOM |
 | actions/attest | v4.2.2 | MIT | Build provenance attestations |
 | pypa/gh-action-pypi-publish | v1.14.3 | BSD-3-Clause | Trusted publishing to PyPI |
-| github/codeql-action (CodeQL) | v4.39.1 | MIT (action), GitHub CodeQL terms (CLI) | Code scanning of Python and the workflows, on this public repository only |
+| github/codeql-action (CodeQL) | v4.39.3 | MIT (action), GitHub CodeQL terms (CLI) | Code scanning of Python and the workflows, on this public repository only |
 
 [45]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/45
 [46]: https://github.com/Official-Space-AI/OpenPhysGraspGen/issues/46
