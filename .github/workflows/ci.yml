@@ -96,3 +96,4 @@ jobs:
           "$RUNNER_TEMP/wheel-env/bin/python" -c "import openphysgraspgen; assert 'site-packages' in openphysgraspgen.__file__, openphysgraspgen.__file__"
           "$RUNNER_TEMP/wheel-env/bin/python" -m pytest -p no:cacheprovider tests
           "$RUNNER_TEMP/wheel-env/bin/openphysgraspgen" > /dev/null
+          test "$("$RUNNER_TEMP/wheel-env/bin/python" -m openphysgraspgen --version)" = "$("$RUNNER_TEMP/wheel-env/bin/openphysgraspgen" --version)"
