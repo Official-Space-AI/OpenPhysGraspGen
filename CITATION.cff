@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: OpenPhysGraspGen
+abstract: "Physics-labelled grasp data generation for deformable objects. Calibrates material models from measurements, transfers parameters to simulation, and records contact force and internal stress for every grasp."
+authors:
+  - name: SpaceAI
+version: 1.0.0rc1
+license: Apache-2.0
+repository-code: "https://github.com/Official-Space-AI/OpenPhysGraspGen"
+keywords:
+  - robotics
+  - grasping
+  - deformable
+  - simulation
+  - hyperelasticity
+  - dataset
