@@ -11,7 +11,7 @@ this scope.
 | Part | Contents | License |
 |---|---|---|
 | The `openphysgraspgen` package (this repository) | Constitutive laws, contact sensors, the grasp data recorder and reader, the dataset check and the PG-T1 scorer (with `1.0.0rc1`), examples and documentation | Apache-2.0 |
-| The grasp dataset ([Hugging Face Hub](https://huggingface.co/datasets/Official-Space-AI/physgraspgen-dataset), [DOI 10.5281/zenodo.23787395](https://doi.org/10.5281/zenodo.23787395)) | Deformable-object grasps with physical ground truth, described in its dataset card. Release `1.0.0rc1` holds 933,896 frames of five object types; later releases add episodes and object types | CC-BY-NC-4.0 |
+| The grasp dataset ([Hugging Face Hub](https://huggingface.co/datasets/Official-Space-AI/physgraspgen-dataset), [DOI 10.5281/zenodo.23787394](https://doi.org/10.5281/zenodo.23787394)) | Deformable-object grasps with physical ground truth, described in its dataset card. Release `1.0.0` holds 2,749,581 frames of 14 object types, successful grasps only; later releases add episodes and object types | CC-BY-NC-4.0 |
 | Benchmarks | PG-T1 with `1.0.0rc1`, PG-T2 and PG-T3 later | Apache-2.0 |
 | The container image (with each release) | The package on the official Python image | Apache-2.0. The base image's packages keep their own licenses |
 
