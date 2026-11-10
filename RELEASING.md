@@ -29,7 +29,7 @@ because that is the import name of the project's internal solver package (#28).
 
 ## Cutting a release
 
-1. Open a pull request that sets `version` in `pyproject.toml` (for example `1.0.0rc1`) and
+1. Open a pull request that sets `version` in `pyproject.toml` and `CITATION.cff` (for example `1.0.0rc1`) and
    updates the roadmap in the README if needed. Merge it after review.
 2. Check the Grype report of the latest `Image` run on `main` (its `image-scan` artifact):
    every finding without a fix that scores CVSS 7.0 or above needs an assessment, as
