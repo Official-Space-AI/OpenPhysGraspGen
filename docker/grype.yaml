@@ -18,4 +18,14 @@
 #       name: python
 #       version: 3.12.13
 #     reason: "No 3.12 release fixes it; assessed in #NN"
-ignore: []
+ignore:
+  - vulnerability: CVE-2026-76844
+    package:
+      name: zlib1g
+      version: "1:1.3.dfsg+really1.3.1-1+b1"
+    reason: "Fixed in Debian's 1:1.3.dfsg+really1.3.1-1+deb13u1, which no digest carries yet; not affected, assessed in #132"
+  - vulnerability: CVE-2026-85091
+    package:
+      name: zlib1g
+      version: "1:1.3.dfsg+really1.3.1-1+b1"
+    reason: "Fixed in Debian's 1:1.3.dfsg+really1.3.1-1+deb13u1, which no digest carries yet; not affected, assessed in #132"
