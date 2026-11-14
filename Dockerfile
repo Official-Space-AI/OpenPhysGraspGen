@@ -10,7 +10,7 @@
 # The base image is written out in FROM so that Dependabot can propose a new digest.
 # BASE_IMAGE repeats it for the label and NOTICE.container, and
 # .github/scripts/check_image.sh fails when the two differ.
-FROM docker.io/library/python:3.12-slim-trixie@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
+FROM docker.io/library/python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 ARG BASE_IMAGE=docker.io/library/python:3.12-slim-trixie@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
 # The docker-library/python Dockerfile that built the base image, at the commit that the
 # org.opencontainers.image.source annotation of its linux/amd64 manifest names, for
