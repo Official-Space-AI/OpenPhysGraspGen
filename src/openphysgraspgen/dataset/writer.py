@@ -106,6 +106,12 @@ class DatasetSpec:
 
 @dataclass(frozen=True)
 class EpisodeFiles:
+    """Paths and recorded counts for an episode's data files.
+
+    Holds destination file paths for frames, trajectory, and camera videos,
+    along with the recorded frame and step counts.
+    """
+
     frames: Path
     trajectory: Path
     videos: dict[str, Path]
@@ -116,6 +122,11 @@ class EpisodeFiles:
 def episode_files(
     root: str | Path, object_type: str, episode_uid: str, cameras: tuple[str, ...]
 ) -> EpisodeFiles:
+    """Compute standard file paths for an episode within a dataset root.
+
+    Takes the dataset root directory, object type, episode UID, and camera names,
+    and returns an EpisodeFiles instance with target paths for parquet files and videos.
+    """
     root = Path(root)
     name = f"{episode_uid}{fmt.PARQUET_SUFFIX}"
     return EpisodeFiles(

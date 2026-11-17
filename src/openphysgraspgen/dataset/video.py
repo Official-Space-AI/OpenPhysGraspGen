@@ -70,6 +70,11 @@ class VideoSpec:
 
 
 def find_ffmpeg(executable: str = "ffmpeg", *, reading: bool = False) -> str:
+    """Locate the ffmpeg binary on PATH or raise RuntimeError if missing.
+
+    Searches PATH for the given executable name. Raises RuntimeError if not found,
+    noting whether an AV1 decoder (reading) or encoder (writing) is required.
+    """
     path = shutil.which(executable)
     if path is None:
         need = (
@@ -82,6 +87,7 @@ def find_ffmpeg(executable: str = "ffmpeg", *, reading: bool = False) -> str:
 
 
 def ffmpeg_version(ffmpeg: str) -> str:
+    """Return the first line of output from ffmpeg -version."""
     result = subprocess.run(
         [ffmpeg, "-hide_banner", "-version"],
         capture_output=True,
