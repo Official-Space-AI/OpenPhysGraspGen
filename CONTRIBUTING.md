@@ -29,8 +29,11 @@ assigned issue has no update for 7 days, a maintainer may unassign it.
 
    ```bash
    python -m venv .venv && source .venv/bin/activate
-   pip install -e ".[dev]"
+   pip install -e ".[dev,dataset]"
    ```
+
+   Tests encoding and decoding AV1 video need an `ffmpeg` with the `libsvtav1`
+   encoder and are skipped without one, while CI runs them in the Python 3.12 job.
 
 3. Make your change with tests. Keep a pull request to one topic; under about
    400 changed lines is easiest to review.
