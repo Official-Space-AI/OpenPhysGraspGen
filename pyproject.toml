@@ -44,6 +44,8 @@ openphysgraspgen = "openphysgraspgen.pipeline:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+# The PEP 561 marker, so that type checkers read the package's annotations.
+openphysgraspgen = ["py.typed"]
 # The acceptance values finalize_dataset ships in every dataset with the check.
 "openphysgraspgen.dataset" = ["check_criteria.yaml"]
 
