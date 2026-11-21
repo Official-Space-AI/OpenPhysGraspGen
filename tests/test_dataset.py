@@ -2278,3 +2278,21 @@ def test_an_encoder_that_fails_to_start_stops_those_started(tmp_path, monkeypatc
     assert len(started) == 1
     assert started[0].poll() is not None
     assert files_under(root) == []
+
+
+def test_dataset_helpers_have_docstrings():
+    from openphysgraspgen.dataset.finalize import DatasetError
+    from openphysgraspgen.dataset.reader import read_metadata
+    from openphysgraspgen.dataset.video import ffmpeg_version, find_ffmpeg
+    from openphysgraspgen.dataset.writer import EpisodeFiles, episode_files
+
+    for obj in [
+        read_metadata,
+        EpisodeFiles,
+        episode_files,
+        find_ffmpeg,
+        ffmpeg_version,
+        DatasetError,
+    ]:
+        assert obj.__doc__ is not None
+        assert len(obj.__doc__.strip()) > 10
