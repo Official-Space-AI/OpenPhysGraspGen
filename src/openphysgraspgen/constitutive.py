@@ -59,6 +59,14 @@ class _HyperelasticParams:
 
 @dataclass(frozen=True)
 class YeohParams(_HyperelasticParams):
+    """Parameters for the third-order Yeoh hyperelastic model.
+
+    c10: First shear parameter in Pa.
+    c20: Second shear parameter in Pa.
+    c30: Third shear parameter in Pa.
+    nu: Poisson's ratio (dimensionless, between -1.0 and 0.5).
+    """
+
     c10: float
     c20: float
     c30: float
@@ -108,6 +116,13 @@ class YeohParams(_HyperelasticParams):
 
 @dataclass(frozen=True)
 class MooneyRivlinParams(_HyperelasticParams):
+    """Parameters for the two-parameter Mooney-Rivlin hyperelastic model.
+
+    c10: First shear parameter in Pa (positive).
+    c01: Second shear parameter in Pa (nonnegative).
+    nu: Poisson's ratio (dimensionless, between -1.0 and 0.5).
+    """
+
     c10: float
     c01: float
     nu: float
@@ -169,6 +184,13 @@ class MooneyRivlinParams(_HyperelasticParams):
 
 @dataclass(frozen=True)
 class OgdenParams(_HyperelasticParams):
+    """Parameters for the three-term Ogden hyperelastic model.
+
+    mu: Three shear moduli in Pa (each active term must satisfy mu * alpha > 0).
+    alpha: Three power exponents (dimensionless, nonzero).
+    nu: Poisson's ratio (dimensionless, between -1.0 and 0.5).
+    """
+
     mu: tuple[float, float, float]
     alpha: tuple[float, float, float]
     nu: float
@@ -237,6 +259,11 @@ def cauchy_stress(
     deformation_gradient: ArrayLike,
     parameters: ConstitutiveParameters,
 ) -> StressTensor:
+    """Compute the true (Cauchy) stress tensor in Pa from a deformation gradient.
+
+    Takes a 3 by 3 deformation gradient and constitutive model parameters,
+    and returns the symmetric 3 by 3 Cauchy stress tensor in Pa.
+    """
     return parameters.cauchy_stress(deformation_gradient)
 
 
@@ -244,10 +271,20 @@ def strain_energy_density(
     deformation_gradient: ArrayLike,
     parameters: ConstitutiveParameters,
 ) -> float:
+    """Compute the elastic strain energy density in J/m^3 (Pa) from a deformation gradient.
+
+    Takes a 3 by 3 deformation gradient and constitutive model parameters,
+    and returns the scalar elastic strain energy density in J/m^3.
+    """
     return parameters.strain_energy_density(deformation_gradient)
 
 
 def von_mises_stress(stress: ArrayLike) -> float:
+    """Compute the scalar von Mises equivalent stress in Pa from a 3 by 3 Cauchy stress.
+
+    Takes a 3 by 3 Cauchy stress tensor in Pa and returns the equivalent
+    scalar von Mises stress in Pa.
+    """
     tensor = np.asarray(stress, dtype=float)
     if tensor.shape != (3, 3):
         raise ValueError("stress must be a 3 by 3 matrix")
