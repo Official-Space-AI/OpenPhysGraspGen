@@ -1577,6 +1577,12 @@ def load_yaml(data: bytes, what: str) -> Any:
             f"{what} repeats the key {exc.key!r} (line {exc.line})"
         ) from None
     except (yaml.YAMLError, UnicodeDecodeError) as exc:
+        # PyYAML 6.0.4's C scanner refuses a document deeper than its own limit while it
+        # looks ahead, before the parser hands over the events counted above.
+        if getattr(exc, "problem", None) == "exceeded maximum nesting depth":
+            raise CheckError(
+                f"{what} nests deeper than {MAX_YAML_NESTING} levels"
+            ) from None
         raise CheckError(f"{what} is not valid YAML: {exc}") from None
 
 
