@@ -17,6 +17,11 @@ from .writer import CONTACT_INPUTS
 
 
 def read_metadata(root: str | Path) -> dict[str, Any]:
+    """Read and parse the dataset's top-level metadata.yaml file.
+
+    Takes the dataset root directory path and returns the parsed YAML contents
+    as a dictionary.
+    """
     with open(Path(root) / fmt.METADATA_NAME, encoding="utf-8") as stream:
         return yaml.safe_load(stream)
 

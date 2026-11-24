@@ -19,7 +19,7 @@ from . import check_dataset as fmt
 
 
 class DatasetError(ValueError):
-    pass
+    """Raised when dataset files or metadata violate structure or consistency rules."""
 
 
 # What every episode of a dataset must state alike. video is the encoder settings; the

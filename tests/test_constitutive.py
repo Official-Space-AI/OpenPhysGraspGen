@@ -65,3 +65,22 @@ def test_invalid_parameters_are_rejected():
         MooneyRivlinParams(c10=0.0, c01=0.1, nu=0.45)
     with pytest.raises(ValueError):
         OgdenParams(mu=(1.0, 0.0, 0.0), alpha=(0.0, 1.0, 1.0), nu=0.45)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "YeohParams",
+        "MooneyRivlinParams",
+        "OgdenParams",
+        "cauchy_stress",
+        "strain_energy_density",
+        "von_mises_stress",
+    ],
+)
+def test_public_names_have_docstrings_with_units(name):
+    import openphysgraspgen as opg
+
+    obj = getattr(opg, name)
+    assert obj.__doc__ is not None
+    assert "Pa" in obj.__doc__
