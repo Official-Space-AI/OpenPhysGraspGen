@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openphysgraspgen"
-version = "1.0.0rc1"
+version = "1.0.0"
 description = "Physics-labelled grasp data generation for deformable objects"
 readme = "README.md"
 license = "Apache-2.0"
