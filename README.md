@@ -3,7 +3,7 @@
 [![CI](https://github.com/Official-Space-AI/OpenPhysGraspGen/actions/workflows/ci.yml/badge.svg)](https://github.com/Official-Space-AI/OpenPhysGraspGen/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Status](https://img.shields.io/badge/status-release%20candidate-yellow)
+![Status](https://img.shields.io/badge/status-stable-brightgreen)
 [![PyPI version](https://img.shields.io/pypi/v/openphysgraspgen.svg)](https://pypi.org/project/openphysgraspgen/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23787394.svg)](https://doi.org/10.5281/zenodo.23787394)
 
@@ -19,8 +19,8 @@ It is the open part of SpaceAI's PhysGraspGen project. The library is pure Pytho
 and NumPy, with sensor layers that read contact buffers from
 [NVIDIA Newton](https://github.com/newton-physics/newton) (VBD solver).
 
-> **Status: release candidate (`1.0.0rc1`).** APIs can still change before `1.0.0`.
-> See the [roadmap](#roadmap) for what comes next.
+> **Status: `1.0.0`, the first stable release.** See the [roadmap](#roadmap) for what
+> each release contains.
 
 ## What is included
 
@@ -141,7 +141,8 @@ Releases follow the plan of the funded project.
 |---|---|---|
 | Beta `0.1.0b0` | Aug 2026 | Constitutive laws, contact sensor, calibration/transfer pipeline (published 2026-08-25) |
 | `1.0.0rc1` | Oct 2026 | Grasp data recorder, PyPI package, public dataset on Hugging Face (1,000,000 frames) with its check script, PG-T1 benchmark reproduction from the dataset, Docker image, CI and SBOM on every release |
-| `1.0.0` | Nov 2026 | Benchmarks, tutorials, license verification |
+| `1.0.0` | Nov 2026 | Runnable examples for the three constitutive laws (Yeoh, Mooney-Rivlin, three-term Ogden), type information (`py.typed`), a citation file, license checks with REUSE and an OSS evaluation of every dependency, vulnerability scans of the image on every release |
+| Later | Not scheduled | PG-T2 and PG-T3 benchmarks |
 
 ## Scope of the open release
 
@@ -151,7 +152,7 @@ PhysGraspGen is developed as open core.
 |---|---|---|
 | Library (this repository) | GitHub | Apache-2.0 |
 | Grasp dataset | Hugging Face Hub (with `1.0.0rc1`) | CC-BY-NC-4.0 |
-| Benchmarks and reproduction scripts | This repository (PG-T1 with `1.0.0rc1`, the rest with `1.0.0`) | Apache-2.0 |
+| Benchmarks and reproduction scripts | This repository (PG-T1 with `1.0.0rc1`, PG-T2 and PG-T3 in a later release) | Apache-2.0 |
 | High-precision solver core | Not published | Commercial |
 
 What SpaceAI offers commercially, how a new part is assigned to one side, and what

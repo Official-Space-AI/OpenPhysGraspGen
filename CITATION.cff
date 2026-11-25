@@ -4,7 +4,7 @@ title: OpenPhysGraspGen
 abstract: "Physics-labelled grasp data generation for deformable objects. Calibrates material models from measurements, transfers parameters to simulation, and records contact force and internal stress for every grasp."
 authors:
   - name: SpaceAI
-version: 1.0.0rc1
+version: 1.0.0
 license: Apache-2.0
 repository-code: "https://github.com/Official-Space-AI/OpenPhysGraspGen"
 keywords:
