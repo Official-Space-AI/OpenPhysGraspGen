@@ -82,7 +82,7 @@ jobs:
       # Syft lists the packages in the image, the base image's Debian packages included,
       # with the licenses it can read from them.
       - name: Generate the image SBOM
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3 (Syft v1.54.0)
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.3 (Syft v1.54.0)
         with:
           image: ${{ env.IMAGE }}
           format: spdx-json
@@ -100,7 +100,7 @@ jobs:
       # Every known vulnerability, with or without a fix, for the release page and the
       # quarterly re-evaluation. This step never fails the run.
       - name: Record the known vulnerabilities
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2 (Grype v0.118.0)
+        uses: anchore/scan-action@11983a512817154c80a9db660c1a184be7513ed6 # v7.4.2 (Grype v0.118.0)
         with:
           sbom: sbom/${{ env.NAME }}.spdx.json
           fail-build: false
@@ -113,7 +113,7 @@ jobs:
       # findings that count as fixed but that no digest of the base image clears; only this
       # step reads it, and naming it turns off the search for a .grype.yaml.
       - name: Scan the image SBOM for fixable vulnerabilities
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2 (Grype v0.118.0)
+        uses: anchore/scan-action@11983a512817154c80a9db660c1a184be7513ed6 # v7.4.2 (Grype v0.118.0)
         with:
           sbom: sbom/${{ env.NAME }}.spdx.json
           fail-build: true
